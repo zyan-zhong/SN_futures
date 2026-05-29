@@ -1,0 +1,60 @@
+# Python/runtime cache
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Build and packaged intermediate outputs
+build/
+build/private_bundle_seed.json
+dist/
+release_archive/
+node_modules/
+frontend/node_modules/
+frontend/dist/
+frontend/*.tsbuildinfo
+frontend/vite.config.js
+frontend/vite.config.d.ts
+
+# Runtime state, generated cache, and local data
+.env
+!.env.example
+app_data/cache/
+app_data/tmp/
+app_data/downloads/
+app_data/data/*.sqlite
+app_data/data/*.sqlite3
+app_data/data/*.db
+app_data/**/*.sqlite
+app_data/**/*.sqlite3
+app_data/**/*.db
+app_data/smoke_test_ok.txt
+outputs/
+_sn_runtime/
+_sn_setup_runtime/
+*.sqlite
+*.sqlite3
+*.db
+
+# Temporary logs and smoke artifacts
+tmp_*
+*.log
+logs/
+*.tmp
+*.temp
+release_build_log.txt
+setup_smoke*.txt
+setup_gpu_smoke.txt
+
+# Browser smoke profiles
+tmp_chrome*/
+frontend/test-results/
+test-results/
+
+# Keep official release installer, but ignore any extra release artifacts.
+release/*
+!release/SNInsightTerminal_Setup.exe
+!release/SHA256SUMS.txt
+packaging/private_release_keys.json
+release/private_bundle_seed.json

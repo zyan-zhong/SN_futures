@@ -1,0 +1,28 @@
+# Recommended deterministic groups for deployment.
+# CPU-Lite installer: install [core] only plus bundled stdlib UI.
+# Research workstation: install [core] + [ml].
+# GPU-Full development: install [core] + [ml] + [gpu].
+
+[core]
+pandas>=2.2,<3
+numpy>=1.26,<3
+requests>=2.31,<3
+beautifulsoup4>=4.12,<5
+python-dateutil>=2.9,<3
+pytz>=2024.1
+akshare>=1.14
+
+[ml]
+scikit-learn>=1.5,<2
+lightgbm>=4.5,<5
+statsmodels>=0.14,<1
+
+[gpu]
+torch>=2.5
+
+[report]
+jinja2>=3.1,<4
+
+[dev]
+pytest>=8,<9
+ruff>=0.6

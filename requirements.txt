@@ -1,0 +1,17 @@
+pandas>=2.2
+numpy>=1.26
+requests>=2.31
+beautifulsoup4>=4.12
+python-dateutil>=2.9
+pytz>=2024.1
+akshare>=1.14
+scikit-learn>=1.5
+scipy>=1.13
+matplotlib>=3.8
+torch>=2.2
+hmmlearn>=0.3
+xgboost>=2.1
+lightgbm>=4.5
+shap>=0.46
+arch>=7.0
+statsmodels>=0.14

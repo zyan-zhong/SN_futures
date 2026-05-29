@@ -1,0 +1,39 @@
+commodity: SHFE_SN
+aliases:
+  - SN
+  - 沪锡
+  - 锡
+  - 锡期货
+  - 沪锡主连
+  - 精炼锡
+  - 锡锭
+  - 锡矿
+  - 锡矿砂
+  - 锡精矿
+  - 焊锡
+  - 半导体
+  - 光伏
+  - 缅甸
+  - 佤邦
+  - 印尼
+  - LME tin
+  - SHFE tin
+  - 仓单
+  - 库存
+  - 交割
+  - 保证金
+  - 手续费
+  - 涨跌停
+  - 交易限额
+
+event_types:
+  exchange_notice: [公告, 通知, 上期所, 保证金, 手续费, 涨跌停, 限仓, 交割]
+  warehouse_receipt_change: [仓单, 注册仓单, 注销仓单]
+  inventory_change: [库存, 库存下降, 库存增加]
+  supply_disruption: [停产, 罢工, 中断, 禁令, 出口限制, 缅甸, 佤邦, 印尼]
+  smelter_output_change: [冶炼, 检修, 复产, 开工率, 产量]
+  import_export: [进口, 出口, 海关, 锡矿砂, 锡精矿]
+  downstream_demand: [半导体, 光伏, 电子, 焊料, 需求, 新能源]
+  macro_policy: [美元, 利率, 美联储, 汇率, PMI, 通胀, 政策]
+  volatility_event: [风险, 波动, 异动, 监管, 涨跌停, 保证金]
+

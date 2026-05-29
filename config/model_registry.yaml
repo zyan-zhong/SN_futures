@@ -1,0 +1,26 @@
+registry_version: v2.8
+symbol: SN
+exchange: SHFE
+policy:
+  activation_rule: candidate_models_must_pass_walk_forward_and_data_quality_checks
+  rollback_rule: rollback_if_candidate_underperforms_active_for_two_validation_windows
+  no_future_leakage: true
+statuses:
+  active:
+    description: 当前终端展示使用的统一方向优先集成模型。
+    source_artifact: app_data/outputs/sn_unified_forecast.json
+  candidate:
+    description: 后台训练和回测中的候选模型，通过样本外验证后才可切换为 active。
+  rollback:
+    description: 最近稳定版本，用于新模型连续弱化时回滚。
+  retired:
+    description: 已退役模型，只保留回测和审计记录。
+required_metrics:
+  - directional_accuracy
+  - direction_coverage_rate
+  - neutral_rate
+  - interval_coverage_rate
+  - center_mae_pct
+  - max_drawdown
+  - sharpe_ratio
+  - data_quality_score

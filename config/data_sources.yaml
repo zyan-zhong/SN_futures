@@ -1,0 +1,34 @@
+# 沪锡 SN 免费/公开数据源配置
+
+market_data:
+  primary:
+    - name: akshare
+      usage: futures_zh_spot / get_futures_daily(SHFE)
+      enabled: true
+    - name: sina_finance
+      usage: 实时行情与快照兜底
+      enabled: true
+  official_check:
+    - name: shfe
+      usage: 合约规则、公告、仓单库存、业务参数校验
+      enabled: true
+  fallback:
+    - name: eastmoney
+      usage: 行情/资讯备选
+      enabled: false
+
+news_policy:
+  chain:
+    - NewsAPI
+    - Alpha Vantage News
+    - SHFE 公告通知
+    - 新浪/东方财富公开财经新闻
+    - 工信部/商务部/海关总署/统计局公开信息
+    - 有色金属行业公开资讯
+  rule: 失败或限流时保留缓存和失败原因，不生成伪新闻。
+
+cache:
+  realtime_ttl_seconds_trading: 15
+  realtime_ttl_seconds_non_trading: 300
+  news_ttl_seconds_trading: 300
+  news_ttl_seconds_non_trading: 1800

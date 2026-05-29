@@ -1,0 +1,16 @@
+{
+  "sample": true,
+  "message_zh": "这是样例数据，仅用于演示界面结构，不代表真实行情或预测。",
+  "symbol": "SN",
+  "contract": "SN_SAMPLE",
+  "source": "sample_data",
+  "data_quality_score": 0.0,
+  "points": [
+    {"time": "2026-05-13 21:00:00", "open": 265000, "high": 266200, "low": 264500, "close": 265800, "volume": 1200, "open_interest": 42000},
+    {"time": "2026-05-14 09:00:00", "open": 265800, "high": 267100, "low": 265200, "close": 266600, "volume": 1350, "open_interest": 42150},
+    {"time": "2026-05-15 09:00:00", "open": 266600, "high": 267000, "low": 264900, "close": 265300, "volume": 1420, "open_interest": 41980},
+    {"time": "2026-05-18 09:00:00", "open": 265300, "high": 266800, "low": 264700, "close": 266100, "volume": 1510, "open_interest": 42240},
+    {"time": "2026-05-19 09:00:00", "open": 266100, "high": 267600, "low": 265600, "close": 267000, "volume": 1600, "open_interest": 42410},
+    {"time": "2026-05-20 09:00:00", "open": 267000, "high": 267400, "low": 265900, "close": 266500, "volume": 980, "open_interest": 42360}
+  ]
+}

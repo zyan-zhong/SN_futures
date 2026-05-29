@@ -1,0 +1,100 @@
+# 沪锡 SN 七周期方向优先预测注册表
+# 代码内置同等默认值；本文件用于审计、调参和部署说明。
+
+next_5m:
+  alias: h5m
+  display_name: 5分钟
+  bar_interval: 5m
+  forecast_steps: 12
+  forecast_span: 60分钟有效交易时间
+  forecast_interval_minutes: 5
+  history_window: 最近10个交易日分钟数据
+  train_window: 最近90个交易日分钟数据
+  backtest_window: 最近3-6个月
+  model_family: intraday_micro
+  target_type: direction_first
+  validation_requires_intraday: true
+
+next_15m:
+  alias: h15m
+  display_name: 15分钟
+  bar_interval: 15m
+  forecast_steps: 16
+  forecast_span: 4小时有效交易时间
+  forecast_interval_minutes: 15
+  history_window: 最近20个交易日分钟数据
+  train_window: 最近180个交易日分钟数据
+  backtest_window: 最近6-9个月
+  model_family: intraday_short
+  target_type: direction_first
+  validation_requires_intraday: true
+
+next_30m:
+  alias: h30m
+  display_name: 30分钟
+  bar_interval: 30m
+  forecast_steps: 16
+  forecast_span: 1-2个交易日内有效交易时间
+  forecast_interval_minutes: 30
+  history_window: 最近30个交易日分钟数据
+  train_window: 最近270个交易日分钟数据
+  backtest_window: 最近9-12个月
+  model_family: intraday_session
+  target_type: direction_first
+  validation_requires_intraday: true
+
+next_hour:
+  alias: h1h
+  display_name: 1小时
+  bar_interval: 1h
+  forecast_steps: 12
+  forecast_span: 2-3个交易日内有效交易时间
+  forecast_interval_minutes: 60
+  history_window: 最近60个交易日
+  train_window: 最近1-2年
+  backtest_window: 最近12-18个月
+  model_family: session_swing
+  target_type: direction_first
+  validation_requires_intraday: true
+
+tomorrow:
+  alias: h1d
+  display_name: 1日
+  bar_interval: 1d
+  forecast_steps: 5
+  forecast_span: 未来5个交易日
+  forecast_trading_day_interval: 1
+  history_window: 最近1年
+  train_window: 最近3-5年
+  backtest_window: 最近2-3年
+  model_family: daily_short
+  target_type: direction_first
+  validation_requires_intraday: false
+
+one_to_two_weeks:
+  alias: h10d
+  display_name: 1-2周
+  bar_interval: 1d
+  forecast_steps: 10
+  forecast_span: 未来10个交易日
+  forecast_trading_day_interval: 1
+  history_window: 最近3年
+  train_window: 最近5-8年
+  backtest_window: 最近3-5年
+  model_family: medium_swing
+  target_type: direction_first
+  validation_requires_intraday: false
+
+one_to_three_months:
+  alias: h60d
+  display_name: 1-3个月
+  bar_interval: 1d
+  forecast_steps: 60
+  forecast_span: 未来60个交易日
+  forecast_trading_day_interval: 1
+  history_window: 最近5年
+  train_window: 尽可能长，至少8-10年
+  backtest_window: 最近5-8年
+  model_family: macro_regime
+  target_type: direction_first
+  validation_requires_intraday: false

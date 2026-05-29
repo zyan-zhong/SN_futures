@@ -1,0 +1,28 @@
+{
+  "sample": true,
+  "message_zh": "这是样例数据，仅用于演示界面结构，不代表真实行情或预测。",
+  "events": [
+    {
+      "title": "[样例] 海外锡矿供应扰动新闻展示",
+      "source": "sample_data",
+      "published_at": "2026-05-18T09:00:00",
+      "url": "",
+      "category": "supply",
+      "sentiment_score": 0.0,
+      "impact_score": 0.0,
+      "used_in_model": false,
+      "summary_zh": "样例新闻，不进入模型，不代表真实事件。"
+    },
+    {
+      "title": "[样例] FOMC/美元利率事件展示",
+      "source": "sample_data",
+      "published_at": "2026-05-19T21:00:00",
+      "url": "",
+      "category": "macro",
+      "sentiment_score": 0.0,
+      "impact_score": 0.0,
+      "used_in_model": false,
+      "summary_zh": "样例新闻，用于展示宏观事件卡片。"
+    }
+  ]
+}

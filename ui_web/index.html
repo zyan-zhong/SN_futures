@@ -1,0 +1,214 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>SNInsightTerminal V3.8 沪锡期货预测分析终端</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-mark">SN</div>
+        <div>
+          <h1>沪锡终端 V3.8</h1>
+          <p>方向优先 · 事件驱动 · 七周期独立</p>
+        </div>
+      </div>
+      <nav>
+        <a href="#dashboard">总览</a>
+        <a href="#matrix">方向矩阵</a>
+        <a href="#charts">价格预测</a>
+        <a href="#events">事件证据</a>
+        <a href="#model">模型证据</a>
+        <a href="#learning">学习回测</a>
+        <a href="#position">持仓情景</a>
+        <a href="#data">数据新鲜度</a>
+        <a href="#reports">报告</a>
+      </nav>
+      <div class="side-note" id="contractBox">主力合约：加载中</div>
+      <div class="side-note" id="sessionBox">运行状态：加载中</div>
+      <div class="compliance">本软件所有内容仅为沪锡期货量化投研参考，不构成任何投资建议，期货交易有风险，投资需谨慎。</div>
+    </aside>
+
+    <main class="app">
+      <header class="topbar">
+        <div>
+          <h2 id="appTitle">SNInsightTerminal V3.8</h2>
+          <p id="subtitle">正在连接本地 API...</p>
+        </div>
+        <div class="actions">
+          <button id="quoteBtn" type="button">刷新现价</button>
+          <button id="refreshBtn" type="button">刷新预测</button>
+          <button id="retrainBtn" type="button">训练候选</button>
+          <button id="gpuTestBtn" type="button">GPU测试</button>
+          <button id="openApiBtn" type="button">API状态</button>
+        </div>
+      </header>
+
+      <section id="appError" class="app-error hidden"></section>
+
+      <section id="dashboard" class="section">
+        <div class="status-grid">
+          <article class="glass"><span>实时现价</span><strong id="livePrice">--</strong><small id="livePriceNote">等待行情</small></article>
+          <article class="glass"><span>交易状态</span><strong id="tradingState">--</strong><small id="tradingWindow">等待交易时段</small></article>
+          <article class="glass"><span>数据质量</span><strong id="qualityScore">--</strong><small id="qualityNote">等待水位</small></article>
+          <article class="glass"><span>验证口径</span><strong id="validationMode">--</strong><small id="validationNote">等待验证</small></article>
+          <article class="glass"><span>方向命中</span><strong id="directionHit">--</strong><small id="directionCoverage">强方向样本 --</small></article>
+          <article class="glass"><span>区间覆盖</span><strong id="rangeHit">--</strong><small id="centerError">中枢误差 --</small></article>
+          <article class="glass"><span>方向闸门</span><strong id="gateStatus">--</strong><small id="gateReason">等待闸门</small></article>
+          <article class="glass"><span>算力档位</span><strong id="computeProfile">--</strong><small id="hardwareNote">自动识别中</small></article>
+        </div>
+        <div class="task-panel" id="taskStatusBox">
+          <div class="task-empty">暂无后台任务。点击上方按钮后，这里会显示任务进度和失败原因。</div>
+        </div>
+        <div class="prediction-grid" id="predictionCards"></div>
+      </section>
+
+      <section id="matrix" class="section">
+        <article class="panel">
+          <div class="panel-title">
+            <h3>七周期方向矩阵</h3>
+            <span>真实后端概率 · 无前端兜底 · 按周期独立模型展示</span>
+          </div>
+          <div id="multiHorizonMatrix" class="table-wrap"></div>
+        </article>
+      </section>
+
+      <section id="charts" class="section two-col">
+        <article class="panel wide">
+          <div class="panel-title">
+            <h3>历史价格与未来预测区间</h3>
+            <select id="horizonSelect">
+              <option value="next_5m">5分钟</option>
+              <option value="next_15m">15分钟</option>
+              <option value="next_30m">30分钟</option>
+              <option value="next_hour">1小时</option>
+              <option value="tomorrow" selected>下一交易日</option>
+              <option value="one_to_two_weeks">1-2周</option>
+              <option value="one_to_three_months">1-3个月</option>
+            </select>
+          </div>
+          <div id="chartStatus" class="chart-status">加载中...</div>
+          <div id="priceChart" class="chart"></div>
+          <div id="chartDiagnostics" class="chart-diagnostics"></div>
+        </article>
+        <article id="events" class="panel">
+          <div class="panel-title">
+            <h3>事件证据</h3>
+            <span id="newsPolicySummary">等待事件链路</span>
+          </div>
+          <div id="eventEvidenceBox" class="diagnostic-list"></div>
+        </article>
+      </section>
+
+      <section id="model" class="section two-col">
+        <article class="panel">
+          <h3>模型证据与晋级</h3>
+          <div id="modelEvidenceBox" class="diagnostic-list"></div>
+        </article>
+        <article class="panel">
+          <h3>新闻政策影响</h3>
+          <div id="newsPolicyBox" class="diagnostic-list"></div>
+        </article>
+      </section>
+
+      <section id="data" class="section two-col">
+        <article class="panel">
+          <h3>数据新鲜度与算力</h3>
+          <div id="dataFreshnessBox" class="diagnostic-list"></div>
+        </article>
+        <article class="panel">
+          <h3>系统真实性审计</h3>
+          <div id="truthAuditBox" class="diagnostic-list"></div>
+        </article>
+      </section>
+
+      <section id="learning" class="section two-col">
+        <article class="panel">
+          <div class="panel-title">
+            <h3>持续学习与回测</h3>
+            <button id="walkForwardBtn" type="button">运行滚动验证</button>
+          </div>
+          <div id="learningBox" class="diagnostic-list"></div>
+        </article>
+        <article class="panel">
+          <div class="panel-title">
+            <h3>各周期性能指标</h3>
+            <button id="eventAblationBtn" type="button">事件消融检查</button>
+          </div>
+          <div id="backtestBox" class="table-wrap"></div>
+        </article>
+      </section>
+
+      <section id="position" class="section two-col">
+        <article class="panel">
+          <h3>持仓情景输入</h3>
+          <form id="positionForm" class="position-form">
+            <label>持仓方向
+              <select name="position_direction">
+                <option value="none">无持仓/观察</option>
+                <option value="long">多头持仓</option>
+                <option value="short">空头持仓</option>
+              </select>
+            </label>
+            <label>持仓数量
+              <input name="quantity" type="number" min="0" step="1" placeholder="例如 1" />
+            </label>
+            <label>持仓均价
+              <input name="avg_price" type="number" min="0" step="10" placeholder="元/吨" />
+            </label>
+            <label>账户权益
+              <input name="account_equity" type="number" min="0" step="1000" placeholder="可选" />
+            </label>
+            <label>最大可承受亏损
+              <input name="max_loss" type="number" min="0" step="100" placeholder="可选" />
+            </label>
+            <label>计划周期
+              <select name="holding_horizon">
+                <option value="intraday">日内</option>
+                <option value="tomorrow">下一交易日</option>
+                <option value="swing">1-2周</option>
+                <option value="trend">1-3个月</option>
+              </select>
+            </label>
+            <button type="submit">生成持仓情景</button>
+          </form>
+        </article>
+        <article class="panel">
+          <h3>情景观察区与风险提示</h3>
+          <div id="positionScenarioBox" class="diagnostic-list">
+            <div class="diagnostic-item">输入持仓信息后，系统会给出观察区、风险区和不确定性提示。仅供投研参考，需独立决策。</div>
+          </div>
+        </article>
+      </section>
+
+      <section id="reports" class="section">
+        <article class="panel report-panel">
+          <div class="panel-title">
+            <h3>报告预览与合规说明</h3>
+            <select id="reportSelect">
+              <option value="daily">日度报告</option>
+              <option value="weekly">周度报告</option>
+              <option value="monthly">月度报告</option>
+              <option value="event">事件报告</option>
+            </select>
+          </div>
+          <pre id="reportContent" class="report-content">报告加载中...</pre>
+          <details class="technical-details debug-panel">
+            <summary>开发调试信息</summary>
+            <pre id="debugContent"></pre>
+          </details>
+        </article>
+      </section>
+    </main>
+
+    <dialog id="driverDialog">
+      <form method="dialog"><button class="dialog-close">关闭</button></form>
+      <div id="driverDialogBody"></div>
+    </dialog>
+
+    <div id="toast" class="toast hidden"></div>
+    <script src="./app.js"></script>
+  </body>
+</html>

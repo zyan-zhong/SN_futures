@@ -1,0 +1,47 @@
+# SNInsightTerminal V2.9.2 event source registry.
+# Free/public sources only. Paid data connectors are intentionally not required.
+
+tier1_official:
+  weight: 1.00
+  providers:
+    - shfe_public
+    - shfe_notice
+    - shfe_warehouse_receipt
+    - shfe_inventory
+    - customs_public
+    - stats_public
+    - miit_policy
+    - ndrc_policy
+    - mofcom_policy
+    - gov_policy
+
+tier2_industry:
+  weight: 0.78
+  providers:
+    - akshare_shmet
+    - akshare_cls
+    - china_nonferrous
+    - cnmn_public
+    - smm_public
+    - mysteel_public
+    - futures_daily
+    - eastmoney_futures
+    - sina_futures
+
+tier3_market:
+  weight: 0.55
+  providers:
+    - newsapi
+    - alpha_vantage_news
+    - alphavantage_news_fallback
+    - eastmoney_quote
+    - sina_finance
+    - lme_public
+    - cache
+
+rate_limits:
+  newsapi: "trade_session_5_15m_non_trade_30_60m"
+  alpha_vantage_news: "trade_session_15m_non_trade_60m"
+  shfe_public: "trade_session_10_30m_non_trade_60m"
+  akshare_news: "trade_session_15m_non_trade_60m"
+

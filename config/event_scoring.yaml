@@ -1,0 +1,38 @@
+thresholds:
+  min_relevance: 0.18
+  min_model_weight: 0.035
+  high_impact: 0.55
+  tier1_min_model_weight: 0.020
+
+time_decay_hours:
+  intraday: 12
+  short: 72
+  medium: 360
+  long: 1080
+
+direction_terms:
+  bullish:
+    - 停产
+    - 罢工
+    - 供应中断
+    - 出口限制
+    - 禁令
+    - 库存下降
+    - 仓单下降
+    - 现货升水
+    - 需求改善
+    - 半导体复苏
+    - 光伏需求
+    - 短缺
+  bearish:
+    - 复产
+    - 供应恢复
+    - 库存增加
+    - 仓单增加
+    - 需求疲弱
+    - 现货贴水
+    - 进口增加
+    - 美元走强
+    - 加息
+    - 风险偏好下降
+

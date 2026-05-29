@@ -1,0 +1,37 @@
+[project]
+name = "sn-insight-terminal"
+version = "3.6.0"
+description = "SHFE SN tin futures research, forecasting, backtest and risk analysis terminal."
+requires-python = ">=3.10"
+dependencies = [
+  "pandas>=2.2,<3",
+  "numpy>=1.26,<3",
+  "requests>=2.31,<3",
+  "beautifulsoup4>=4.12,<5",
+  "python-dateutil>=2.9,<3",
+  "pytz>=2024.1",
+  "akshare>=1.14",
+]
+
+[project.optional-dependencies]
+ml = [
+  "scikit-learn>=1.5,<2",
+  "lightgbm>=4.5,<5",
+  "statsmodels>=0.14,<1",
+]
+gpu = [
+  "torch>=2.5",
+]
+report = [
+  "jinja2>=3.1,<4",
+]
+dev = [
+  "pytest>=8,<9",
+  "ruff>=0.6",
+]
+
+[tool.ruff]
+line-length = 120
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

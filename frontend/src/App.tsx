@@ -9,21 +9,25 @@ import { DashboardPage } from "./pages/DashboardPage";
 import { DataStatusPage } from "./pages/DataStatusPage";
 import { EventPage } from "./pages/EventPage";
 import { FactorPage } from "./pages/FactorPage";
+import { MarketMonitorPage } from "./pages/MarketMonitorPage";
 import { ModelGovernancePage } from "./pages/ModelGovernancePage";
 import { PositionPage } from "./pages/PositionPage";
 import { PredictionPage } from "./pages/PredictionPage";
 import { ReportsPage } from "./pages/ReportsPage";
 import { ResearchLabPage } from "./pages/ResearchLabPage";
 import { SettingsPage } from "./pages/SettingsPage";
+import { TrainingDataPage } from "./pages/TrainingDataPage";
 import { useFirstRun } from "./hooks/useFirstRun";
 import { useLocalSetting } from "./hooks/useLocalSetting";
 import { useTerminalSnapshot } from "./hooks/useTerminalSnapshot";
 
 export type PageKey =
   | "dashboard"
+  | "market"
   | "predictions"
   | "factors"
   | "events"
+  | "training"
   | "backtest"
   | "governance"
   | "research"
@@ -58,31 +62,39 @@ export default function App() {
     : snapshot;
 
   function renderPage() {
-    if (loading && !visibleSnapshot) return <LoadingState label="正在连接沪锡专业终端..." />;
-    if (error && !visibleSnapshot) return <ErrorState message={error} onRetry={refresh} />;
+    if (loading && !visibleSnapshot && page === "dashboard") {
+      return <LoadingState label="正在连接沪锡专业终端..." />;
+    }
+    if (error && !visibleSnapshot && page === "dashboard") {
+      return <ErrorState message={error} onRetry={refresh} />;
+    }
     switch (page) {
       case "dashboard":
         return <DashboardPage snapshot={visibleSnapshot} onRefresh={refresh} showSampleData={showSampleData} />;
-      case "predictions":
-        return <PredictionPage snapshot={visibleSnapshot} onNavigate={setPage} onRefresh={refresh} showSampleData={showSampleData} />;
-      case "factors":
-        return <FactorPage showSampleData={showSampleData} />;
+      case "market":
+        return <MarketMonitorPage />;
       case "events":
         return <EventPage onNavigate={setPage} showSampleData={showSampleData} />;
-      case "backtest":
-        return <BacktestPage />;
-      case "governance":
-        return <ModelGovernancePage snapshot={visibleSnapshot} />;
+      case "factors":
+        return <FactorPage showSampleData={showSampleData} />;
+      case "training":
+        return <TrainingDataPage />;
       case "research":
         return <ResearchLabPage />;
-      case "position":
-        return <PositionPage />;
+      case "backtest":
+        return <BacktestPage />;
+      case "predictions":
+        return <PredictionPage snapshot={visibleSnapshot} onNavigate={setPage} onRefresh={refresh} showSampleData={showSampleData} />;
       case "reports":
         return <ReportsPage showSampleData={showSampleData} />;
-      case "data":
-        return <DataStatusPage snapshot={visibleSnapshot} onNavigate={setPage} onRefresh={refresh} />;
       case "settings":
         return <SettingsPage />;
+      case "data":
+        return <DataStatusPage snapshot={visibleSnapshot} onNavigate={setPage} onRefresh={refresh} />;
+      case "governance":
+        return <ModelGovernancePage snapshot={visibleSnapshot} />;
+      case "position":
+        return <PositionPage />;
       default:
         return <DashboardPage snapshot={visibleSnapshot} showSampleData={showSampleData} />;
     }

@@ -63,6 +63,7 @@ V3_EVENT_INPUT_COLS = (
     "inventory_shock_score",
     "macro_risk_score",
     "exchange_event_score",
+    "source_reliability_weighted_score",
     "event_recency_decay_score",
     "max_relevance_score",
     "avg_relevance_score",
@@ -337,12 +338,12 @@ def build_training_dataset(
     feature_store_version: str | None = None,
 ) -> dict[str, Any]:
     dataset_version = _normalise_version(dataset_version)
-    if feature_store_version or dataset_version == "v3":
+    if feature_store_version or dataset_version in {"v3", "v4"}:
         return _build_training_dataset_from_feature_store(
             horizons=horizons,
             min_feature_coverage=min_feature_coverage,
             dataset_version=dataset_version,
-            feature_store_version=feature_store_version or "v3",
+            feature_store_version=feature_store_version or dataset_version,
             feature_set=feature_set,
         )
     out = _output_dir()

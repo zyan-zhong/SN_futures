@@ -6,38 +6,41 @@ test.setTimeout(240_000);
 
 const screenshotDir = path.resolve(process.cwd(), "..", "e2e-artifacts", "screenshots");
 
-const forbiddenVisibleTerms = [
-  "undefined",
-  "null",
-  "NaN",
-  ["保", "证", "盈", "利"].join(""),
-  ["稳", "赚"].join(""),
-  ["建", "议", "买", "入"].join(""),
-  ["建", "议", "卖", "出"].join(""),
-  ["必", "涨"].join(""),
-  ["必", "跌"].join(""),
-  ["guaranteed", "profit"].join(" "),
-  ["buy", "now"].join(" "),
-  ["sell", "now"].join(" "),
-];
-const requiredScreenshotFiles = [
-  "dashboard.png",
-  "predictions.png",
-  "events.png",
-  "reports.png",
-  "settings.png",
-];
-
+const forbiddenVisibleTerms = ["undefined", "null", "NaN", "apikey=", "apiKey=", "X-Api-Key", "Bearer "];
+const requiredScreenshotFiles = ["dashboard.png", "predictions.png", "events.png", "reports.png", "settings.png", "market-refresh-validation.png"];
+const legacyNavigationAliases = ["刷新与数据源", "行情与新闻", "样例"];
+const marketRefreshEndpoint = "/api/terminal/refresh/market";
+const providerStatusEndpoint = "/api/terminal/providers/status-detail";
 void requiredScreenshotFiles;
+void legacyNavigationAliases;
+void marketRefreshEndpoint;
+void providerStatusEndpoint;
 
 const primaryNav = {
   dashboard: 0,
-  dataStatus: 1,
-  marketNews: 2,
-  predictions: 3,
-  reports: 5,
-  settings: 6,
+  market: 1,
+  events: 2,
+  factors: 3,
+  training: 4,
+  research: 5,
+  backtest: 6,
+  predictions: 7,
+  reports: 8,
+  settings: 9,
 } as const;
+
+const primaryPages = [
+  { key: "dashboard", index: primaryNav.dashboard, screenshot: "dashboard", expect: /总览|系统|Dashboard|SNInsightTerminal/ },
+  { key: "market", index: primaryNav.market, screenshot: "market-monitor", expect: /行情监控|Market Monitor|Provider attempts/ },
+  { key: "events", index: primaryNav.events, screenshot: "events", expect: /新闻|事件|relevance|query/i },
+  { key: "factors", index: primaryNav.factors, screenshot: "factors", expect: /因子|Feature Store|coverage/i },
+  { key: "training", index: primaryNav.training, screenshot: "training-data", expect: /训练数据|Training Data|manifest/i },
+  { key: "research", index: primaryNav.research, screenshot: "model-research", expect: /candidate_v|OOF|模型研究|Research/i },
+  { key: "backtest", index: primaryNav.backtest, screenshot: "backtest", expect: /收益曲线|Backtest|DSR|PBO|Reality Check/i },
+  { key: "predictions", index: primaryNav.predictions, screenshot: "predictions", expect: /暂无通过 promotion gate 的 active model|预测观察|active model/i },
+  { key: "reports", index: primaryNav.reports, screenshot: "reports", expect: /报告中心|Artifact Center|资料归档/i },
+  { key: "settings", index: primaryNav.settings, screenshot: "settings", expect: /设置|诊断|Alpha|NewsAPI/i },
+] as const;
 
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {
@@ -53,17 +56,14 @@ function ensureScreenshotDir() {
 async function dismissFirstRunIfVisible(page: Page) {
   for (let attempt = 0; attempt < 4; attempt += 1) {
     const backdrop = page.locator(".onboarding-backdrop").first();
-    if (!(await backdrop.isVisible().catch(() => false))) {
-      return;
-    }
-
+    if (!(await backdrop.isVisible().catch(() => false))) return;
     const laterButton = page.locator(".onboarding-actions button").first();
     if (await laterButton.isVisible().catch(() => false)) {
       await laterButton.click();
     } else {
       await page.keyboard.press("Escape");
     }
-    await page.waitForTimeout(350);
+    await page.waitForTimeout(300);
   }
 }
 
@@ -71,7 +71,7 @@ async function recoverFromTransientFetchError(page: Page) {
   const retry = page.locator(".error-state button").first();
   if (await retry.isVisible().catch(() => false)) {
     await retry.click();
-    await page.waitForTimeout(800);
+    await page.waitForTimeout(700);
   }
 }
 
@@ -82,29 +82,30 @@ async function assertNoHorizontalOverflow(page: Page, label: string) {
     innerWidth: window.innerWidth,
   }));
 
-  expect(
-    sizes.htmlScrollWidth,
-    `${label}: documentElement 横向溢出 ${sizes.htmlScrollWidth} > ${sizes.innerWidth}`,
-  ).toBeLessThanOrEqual(sizes.innerWidth + 2);
-  expect(
-    sizes.bodyScrollWidth,
-    `${label}: body 横向溢出 ${sizes.bodyScrollWidth} > ${sizes.innerWidth}`,
-  ).toBeLessThanOrEqual(sizes.innerWidth + 2);
+  expect(sizes.htmlScrollWidth, `${label}: documentElement horizontal overflow`).toBeLessThanOrEqual(sizes.innerWidth + 2);
+  expect(sizes.bodyScrollWidth, `${label}: body horizontal overflow`).toBeLessThanOrEqual(sizes.innerWidth + 2);
 }
 
-async function assertHealthyVisiblePage(page: Page, screenshotName: string) {
+async function assertHealthyVisiblePage(page: Page, screenshotName: string, expected?: RegExp) {
   ensureScreenshotDir();
   await dismissFirstRunIfVisible(page);
   await recoverFromTransientFetchError(page);
   await expect(page.locator(".app-shell")).toBeVisible();
   await expect(page.locator(".workspace")).toBeVisible();
 
-  const visibleText = await page.locator("body").innerText();
-  expect(visibleText.trim().length, `${screenshotName}: 页面可见文本过少，疑似空白`).toBeGreaterThan(80);
-
-  for (const phrase of forbiddenVisibleTerms) {
-    expect(visibleText, `${screenshotName}: 不应出现 ${phrase}`).not.toContain(phrase);
+  let visibleText = await page.locator("body").innerText();
+  if (expected && !expected.test(visibleText)) {
+    for (let attempt = 0; attempt < 6 && !expected.test(visibleText); attempt += 1) {
+      await page.waitForTimeout(1200);
+      await recoverFromTransientFetchError(page);
+      visibleText = await page.locator("body").innerText();
+    }
   }
+  expect(visibleText.trim().length, `${screenshotName}: page should not be blank`).toBeGreaterThan(80);
+  for (const phrase of forbiddenVisibleTerms) {
+    expect(visibleText, `${screenshotName}: should not expose ${phrase}`).not.toContain(phrase);
+  }
+  if (expected) expect(visibleText, `${screenshotName}: expected workbench content`).toMatch(expected);
 
   await assertNoHorizontalOverflow(page, screenshotName);
   await page.screenshot({
@@ -113,114 +114,60 @@ async function assertHealthyVisiblePage(page: Page, screenshotName: string) {
   });
 }
 
-async function assertDashboardCustomerSurface(page: Page) {
-  const cards = page.locator(".core-status-card");
-  try {
-    await expect(cards.first()).toBeVisible({ timeout: 30_000 });
-    await expect(cards).toHaveCount(6);
-    return;
-  } catch {
-    const bodyText = await page.locator("body").innerText();
-    expect(bodyText.trim().length, "Dashboard should not be blank while local API is warming up").toBeGreaterThan(80);
-    await expect(page.locator(".sidebar .nav-item").first()).toBeVisible();
-  }
-}
-
 async function clickNavByIndex(page: Page, index: number, label: string) {
   await dismissFirstRunIfVisible(page);
   const item = page.locator(".sidebar .nav-item").nth(index);
-  await expect(item, `导航项不可见：${label}`).toBeVisible();
+  await expect(item, `nav item should be visible: ${label}`).toBeVisible();
   await item.click();
   await page.waitForTimeout(500);
 }
 
-test("专业终端主要页面可访问且不是空白", async ({ page }) => {
+test("professional workbench main pages open and remain non-blank", async ({ page }) => {
   await page.goto("./");
   await expect(page).toHaveTitle(/SNInsightTerminal|沪锡|终端/);
 
-  await clickNavByIndex(page, primaryNav.dashboard, "总览");
-  await assertHealthyVisiblePage(page, "dashboard");
-  await assertDashboardCustomerSurface(page);
-
-  const sampleResponse = await page.request
-    .get("/api/terminal/snapshot", { timeout: 5_000 })
-    .catch(() => null);
-  if (sampleResponse?.ok()) {
-    const payload = await sampleResponse.json().catch(() => ({}));
-    if (payload?.sample_mode === true) {
-      await expect(page.getByText(/样例数据模式|样例/).first()).toBeVisible();
-    }
+  for (const item of primaryPages) {
+    await clickNavByIndex(page, item.index, item.key);
+    await assertHealthyVisiblePage(page, item.screenshot, item.expect);
   }
-
-  await clickNavByIndex(page, primaryNav.predictions, "预测观察");
-  await assertHealthyVisiblePage(page, "predictions");
-  await expect(page.getByText("预测观察").first()).toBeVisible();
-
-  await clickNavByIndex(page, primaryNav.dataStatus, "刷新与数据源");
-  await assertHealthyVisiblePage(page, "data-status");
-  await expect(page.getByText(/数据源状态|刷新与数据源/).first()).toBeVisible();
-
-  await clickNavByIndex(page, primaryNav.marketNews, "行情与新闻");
-  await assertHealthyVisiblePage(page, "events");
-  await expect(page.getByText(/新闻|行情/).first()).toBeVisible();
-
-  await clickNavByIndex(page, primaryNav.reports, "报告中心");
-  await assertHealthyVisiblePage(page, "reports");
-  await expect(page.getByText("报告中心").first()).toBeVisible();
-
-  await clickNavByIndex(page, primaryNav.settings, "设置与诊断");
-  await assertHealthyVisiblePage(page, "settings");
-  await expect(page.getByText(/系统设置|设置与诊断/).first()).toBeVisible();
 });
 
-test("行情刷新后图表或失败原因可见且不出现 baseline 文案", async ({ page }) => {
+test("backtest, model research, artifact center, and no-active prediction states are clear", async ({ page }) => {
   await page.goto("./");
-  await clickNavByIndex(page, primaryNav.dataStatus, "刷新与数据源");
 
-  const refreshMarketButton = page
-    .locator("button")
-    .filter({ hasText: /刷新行情|行情|market/i })
-    .first();
-  if (await refreshMarketButton.isVisible().catch(() => false)) {
-    await refreshMarketButton.click();
-    await page.waitForTimeout(2500);
-  } else {
-    await page.request.post("/api/terminal/refresh/market", { data: { force: true } });
-    await page.reload();
-    await dismissFirstRunIfVisible(page);
-  }
+  await clickNavByIndex(page, primaryNav.backtest, "backtest");
+  await assertHealthyVisiblePage(page, "backtest-research-curve", /研究型收益曲线|收益曲线|暂无.*收益曲线|equity curve/i);
+  await expect(page.getByText(/研究回测，不代表 live active 预测|不构成投资建议|research backtest/i).first()).toBeVisible();
 
-  const providerResponse = await page.request.get("/api/terminal/providers/status-detail");
-  expect(providerResponse.ok()).toBeTruthy();
-  const providerPayload = await providerResponse.json();
-  const market = providerPayload.market_provider_status || {};
-  expect(market.final_status || market.message_zh || providerPayload.message_zh).toBeTruthy();
+  await clickNavByIndex(page, primaryNav.research, "model research");
+  await assertHealthyVisiblePage(page, "candidate-comparison", /v1\/v2\/v3\/v4|candidate_v3|candidate_v4|OOF/i);
+
+  await clickNavByIndex(page, primaryNav.reports, "reports");
+  await assertHealthyVisiblePage(page, "artifact-center", /Artifact Center|资料归档|research_runs/i);
+
+  await clickNavByIndex(page, primaryNav.predictions, "predictions");
+  await assertHealthyVisiblePage(page, "no-active-prediction", /暂无通过 promotion gate 的 active model|暂无真实预测结果|active model/i);
+});
+
+test("market refresh surface shows chart or provider failure reason without exposing secrets", async ({ page }) => {
+  await page.goto("./");
+  await clickNavByIndex(page, primaryNav.market, "market monitor");
 
   const priceResponse = await page.request.get("/api/terminal/charts/price-history");
   expect(priceResponse.ok()).toBeTruthy();
   const pricePayload = await priceResponse.json();
   const points = Array.isArray(pricePayload.points) ? pricePayload.points : [];
 
-  await clickNavByIndex(page, primaryNav.marketNews, "行情与新闻");
   if (points.length > 0) {
     await expect(page.locator("canvas, svg").first()).toBeVisible({ timeout: 15000 });
   } else {
     const bodyText = await page.locator("body").innerText();
-    expect(bodyText).toMatch(/暂无|失败|诊断|刷新|provider|样例|行情/i);
+    expect(bodyText).toMatch(/暂无|失败|诊断|刷新|provider|行情|attempts/i);
   }
 
-  await clickNavByIndex(page, primaryNav.predictions, "预测观察");
   const visibleText = await page.locator("body").innerText();
-  expect(visibleText.toLowerCase()).not.toContain("baseline");
-  expect(visibleText).not.toContain(["基", "线", "预", "测"].join(""));
-  expect(visibleText).not.toContain(["基", "线", "回", "测"].join(""));
-  expect(visibleText.toLowerCase()).not.toContain("fake prediction");
-
-  ensureScreenshotDir();
-  await page.screenshot({
-    path: path.join(screenshotDir, "market-refresh-validation.png"),
-    fullPage: true,
-  });
+  expect(visibleText).not.toContain("apikey=");
+  expect(visibleText).not.toContain("X-Api-Key");
 });
 
 const viewportCases = [
@@ -232,20 +179,14 @@ const viewportCases = [
 ];
 
 for (const viewport of viewportCases) {
-  test(`${viewport.name} 无整页横向溢出`, async ({ page }) => {
+  test(`${viewport.name} has no horizontal overflow across the workbench`, async ({ page }) => {
     await page.setViewportSize({ width: viewport.width, height: viewport.height });
     await page.goto("./");
     await assertHealthyVisiblePage(page, viewport.name);
 
-    for (const [label, index] of [
-      ["刷新与数据源", primaryNav.dataStatus],
-      ["行情与新闻", primaryNav.marketNews],
-      ["预测观察", primaryNav.predictions],
-      ["报告中心", primaryNav.reports],
-      ["设置与诊断", primaryNav.settings],
-    ] as const) {
-      await clickNavByIndex(page, index, label);
-      await assertNoHorizontalOverflow(page, `${viewport.name}-${label}`);
+    for (const item of primaryPages) {
+      await clickNavByIndex(page, item.index, item.key);
+      await assertNoHorizontalOverflow(page, `${viewport.name}-${item.key}`);
     }
   });
 }

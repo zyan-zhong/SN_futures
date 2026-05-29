@@ -93,3 +93,31 @@ The NewsAPI event gate now records query-group diagnostics and keyword evidence 
 - Low-relevance articles can be shown in the UI but do not enter `event_factor_inputs.json`.
 - Macworld, PyPI, generic software, Apple accessories, sports, entertainment, and generic tin-can/food-packaging articles remain excluded.
 - If no high-relevance news passes the gate, the event factor input stays empty and the UI states that the system will not fabricate event factors.
+
+# Prompt 62S Update
+
+News query profile v3 adds stricter tin-industry groups before broader fallback groups:
+
+- `exchange_inventory`: LME/SHFE/Shanghai tin plus inventory, warehouse, stockpile or stocks.
+- `supply_asia_strict`: tin plus Indonesia, Myanmar, Wa State or Man Maw plus mine, smelter, export, quota, suspension or supply.
+- `futures_price`: SHFE tin, Shanghai tin futures, 沪锡 or 锡期货 plus price, futures, open interest or volume.
+- `demand_electronics`: tin plus solder, semiconductor, PCB, photovoltaic or electronics plus demand, shortage or inventory.
+- `chinese_strict`: 沪锡、上期所锡、锡库存、锡升贴水、缅甸锡、印尼锡。
+
+入模门槛保持严格：
+
+- `relevance_score >= 0.60`
+- `hard_evidence_score >= 0.30`
+- `commodity_entity_score > 0`
+- `category != irrelevant`
+- `domain_blacklist_penalty < 0.5`
+- `negative_keyword_penalty < 0.4`
+- 必须存在 keyword evidence。
+
+新增 source quality profile：
+
+- 白名单来源提高 `source_reliability_score`，但不能绕过相关性和硬证据门槛。
+- 黑名单或泛软件/消费娱乐/食品罐头来源会触发 `domain_blacklist_penalty`。
+- 新增 `GET /api/terminal/events/source-quality-report` 和前端“新闻源质量诊断”区域。
+
+如果仍然没有入模新闻，系统明确显示“无通过相关性门槛的沪锡新闻，系统未构造事件因子”，并保持 `event_factor_inputs.inputs=[]`。

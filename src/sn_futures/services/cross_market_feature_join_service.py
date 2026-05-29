@@ -64,6 +64,9 @@ def _date_col(frame: pd.DataFrame) -> str | None:
 def _empty_diagnostics(reason: str, source_path: Path | None = None) -> dict[str, Any]:
     return {
         "source_path": str(source_path or ""),
+        "status": reason,
+        "from_cache": False,
+        "stale": False,
         "raw_row_count": 0,
         "normalized_row_count": 0,
         "date_start": None,
@@ -94,6 +97,9 @@ def load_cross_market_frame(output_dir: Path | None = None) -> tuple[pd.DataFram
     normalized = normalize_cross_market_dates(frame)
     diagnostics = {
         "source_path": str(path),
+        "status": str(payload.get("status") or "") if isinstance(payload, Mapping) else "",
+        "from_cache": bool(payload.get("from_cache")) if isinstance(payload, Mapping) else False,
+        "stale": bool(payload.get("stale")) if isinstance(payload, Mapping) else False,
         "raw_row_count": int(len(rows)),
         "normalized_row_count": int(len(normalized)),
         "date_start": normalized.index.min().isoformat() if not normalized.empty else None,
@@ -229,6 +235,10 @@ def align_cross_market_to_market_history(
         "fields": [field for field in CROSS_MARKET_VALUE_FIELDS if field in aligned.columns],
         "field_diagnostics": field_diagnostics,
         "blocking_reasons": sorted(set(blocking)),
+        "from_cache": bool(status_payload.get("from_cache")),
+        "stale": bool(status_payload.get("stale")),
+        "status": status,
+        "cooldown_until": str(status_payload.get("cooldown_until") or ""),
         "last_source_dates": last_source_dates,
         "lme_tin_close_status": "unavailable",
         "message_zh": "跨市场数据已按沪锡交易日对齐；超过 5 个交易日的 forward-fill 会标记为 stale。",

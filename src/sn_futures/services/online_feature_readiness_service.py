@@ -233,6 +233,9 @@ def _apply_cross_market_alignment_status(
     for row in field_rows:
         if row.get("category") != "cross_market":
             continue
+        row["from_cache"] = bool(alignment.get("from_cache")) if isinstance(alignment, Mapping) else False
+        row["stale"] = bool(alignment.get("stale")) if isinstance(alignment, Mapping) else False
+        row["cooldown_until"] = str(alignment.get("cooldown_until") or "") if isinstance(alignment, Mapping) else ""
         field = str(row.get("field") or "")
         info = field_diagnostics.get(field) if isinstance(field_diagnostics, Mapping) else None
         if isinstance(info, Mapping):

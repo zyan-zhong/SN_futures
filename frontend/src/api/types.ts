@@ -247,6 +247,10 @@ export interface OnlineDataSourceEntry {
   fields_provided?: string[];
   status?: string;
   last_success_time?: string;
+  last_attempt_time?: string;
+  cooldown_until?: string;
+  row_count?: number;
+  from_cache?: boolean;
   next_actions_zh?: string[];
 }
 
@@ -404,8 +408,13 @@ export interface NewsEventItem {
   sentiment_score?: NullableNumber;
   impact_score?: NullableNumber;
   relevance_score?: NullableNumber;
+  hard_evidence_score?: NullableNumber;
+  source_reliability_score?: NullableNumber;
+  source_domain?: string;
+  domain_blacklist_penalty?: NullableNumber;
   allowed_for_event_factor?: boolean;
   used_in_model?: boolean;
+  inclusion_reason?: string;
   exclusion_reason?: string;
   summary_zh?: string;
   query_group?: string;
@@ -431,8 +440,12 @@ export interface NewsRelevanceDiagnosticsArticle {
   query_group?: string;
   relevance_score?: NullableNumber;
   tin_entity_score?: NullableNumber;
+  hard_evidence_score?: NullableNumber;
+  source_reliability_score?: NullableNumber;
+  source_domain?: string;
   category?: string;
   used_in_model?: boolean;
+  inclusion_reason?: string;
   exclusion_reason?: string;
   keyword_hits?: string[];
   negative_keyword_hits?: string[];
@@ -450,6 +463,19 @@ export interface NewsRelevanceDiagnosticsPayload {
     avg_relevance?: NullableNumber;
   }>;
   recommendations_zh?: string[];
+  message_zh?: string;
+}
+
+export interface NewsSourceQualityReport {
+  article_count?: number;
+  used_in_model_count?: number;
+  domains?: Array<{
+    domain?: string;
+    article_count?: number;
+    used_in_model_count?: number;
+    avg_source_reliability?: NullableNumber;
+  }>;
+  source_reliability?: { avg_score?: NullableNumber };
   message_zh?: string;
 }
 
@@ -548,6 +574,17 @@ export interface FeatureCoveragePayload {
   message_zh?: string;
   warnings?: string[];
   data_quality_score?: NullableNumber;
+  cross_market_diagnostics?: {
+    date_start?: string | null;
+    date_end?: string | null;
+    exact_date_overlap_count?: number;
+    aligned_non_null_count?: number;
+    stale_row_count?: number;
+    blocking_reasons?: string[];
+    from_cache?: boolean;
+    stale?: boolean;
+    fields?: string[];
+  };
 }
 
 export interface OnlineFieldReadiness {
@@ -561,6 +598,9 @@ export interface OnlineFieldReadiness {
   aligned_non_null_count?: number;
   aligned_non_null_rate?: NullableNumber;
   usable_for_training?: boolean;
+  from_cache?: boolean;
+  stale?: boolean;
+  cooldown_until?: string;
   latest_value?: NullableNumber | string;
   message_zh?: string;
 }
@@ -978,6 +1018,10 @@ export interface CandidateV3ResearchPayload {
   feature_store_version?: string;
   feature_set?: string;
   horizons?: string[];
+  incremental_feature_cols?: string[];
+  cross_market_feature_cols?: string[];
+  event_feature_cols?: string[];
+  reason_zh?: string;
   candidate?: CandidateTrainingStatus;
   institutional_validation?: InstitutionalValidationReport;
   promotion_dry_run?: PromotionReportPayload;
@@ -989,3 +1033,5 @@ export interface CandidateV3ResearchPayload {
   active_updated?: boolean;
   customer_prediction_generated?: boolean;
 }
+
+export type CandidateV4ResearchPayload = CandidateV3ResearchPayload;

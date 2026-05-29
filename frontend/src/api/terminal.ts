@@ -13,6 +13,7 @@ import type {
   ModelHealth,
   NewsEventsPayload,
   NewsRelevanceDiagnosticsPayload,
+  NewsSourceQualityReport,
   PositionScenarioInput,
   PositionScenarioResult,
   PriceHistoryPayload,
@@ -46,6 +47,7 @@ import type {
   OnlineDataSourceRegistry,
   OnlineFeatureReadinessPayload,
   CandidateV3ResearchPayload,
+  CandidateV4ResearchPayload,
   ResearchArtifactsPayload,
   ResearchBacktestPayload,
   ResearchEquityCurvePayload,
@@ -191,6 +193,10 @@ export function getNewsRelevanceDiagnostics() {
   return getJson<NewsRelevanceDiagnosticsPayload>("/api/terminal/events/relevance-diagnostics");
 }
 
+export function getNewsSourceQualityReport() {
+  return getJson<NewsSourceQualityReport>("/api/terminal/events/source-quality-report");
+}
+
 export function getEventEvidence(horizon = "tomorrow") {
   return getJson<EventEvidencePayload>(`/api/terminal/events/evidence?horizon=${encodeURIComponent(horizon)}`);
 }
@@ -312,7 +318,11 @@ export function runCandidateV3Research(input: { horizons?: string[] } = {}) {
   return postJson<CandidateV3ResearchPayload>("/api/terminal/research/run-candidate-v3", input);
 }
 
-export function runResearchBacktest(input: { candidate_version?: string; horizons?: string[] } = {}) {
+export function runCandidateV4Research(input: { horizons?: string[] } = {}) {
+  return postJson<CandidateV4ResearchPayload>("/api/terminal/research/run-candidate-v4", input);
+}
+
+export function runResearchBacktest(input: { candidate_version?: string; version?: string; horizons?: string[] } = {}) {
   return postJson<ResearchBacktestPayload>("/api/terminal/research/run-backtest", input);
 }
 
@@ -328,12 +338,15 @@ export function getResearchEquityCurve(horizon = "1d", runId?: string, candidate
   return getJson<ResearchEquityCurvePayload>(`/api/terminal/research/equity-curve?${params.toString()}`);
 }
 
-export function getResearchArtifacts(runId?: string) {
-  const suffix = runId ? `?run_id=${encodeURIComponent(runId)}` : "";
+export function getResearchArtifacts(runId?: string, candidateVersion?: string) {
+  const params = new URLSearchParams();
+  if (runId) params.set("run_id", runId);
+  if (candidateVersion) params.set("candidate_version", candidateVersion);
+  const suffix = params.toString() ? `?${params.toString()}` : "";
   return getJson<ResearchArtifactsPayload>(`/api/terminal/research/artifacts${suffix}`);
 }
 
-export function optimizeResearchStrategy(input: { candidate_version?: string; horizons?: string[] } = {}) {
+export function optimizeResearchStrategy(input: { candidate_version?: string; version?: string; horizons?: string[] } = {}) {
   return postJson<StrategyOptimizationPayload>("/api/terminal/research/optimize-strategy", input);
 }
 

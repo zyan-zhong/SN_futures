@@ -40,6 +40,9 @@ def _status_from_file(path: Path, default_status: str = "unavailable") -> dict[s
     return {
         "status": status,
         "last_success_time": str(payload.get("last_success_time") or payload.get("generated_at") or ""),
+        "last_attempt_time": str(payload.get("last_attempt_time") or ""),
+        "cooldown_until": str(payload.get("cooldown_until") or ""),
+        "from_cache": bool(payload.get("from_cache")),
         "row_count": row_count,
         "message_zh": str(payload.get("message_zh") or ""),
     }
@@ -59,6 +62,10 @@ def _entry(
     fields_provided: list[str],
     status: str,
     last_success_time: str = "",
+    last_attempt_time: str = "",
+    cooldown_until: str = "",
+    row_count: int = 0,
+    from_cache: bool = False,
     next_actions_zh: list[str] | None = None,
 ) -> dict[str, Any]:
     return {
@@ -75,6 +82,10 @@ def _entry(
         "fields_provided": fields_provided,
         "status": status,
         "last_success_time": last_success_time,
+        "last_attempt_time": last_attempt_time,
+        "cooldown_until": cooldown_until,
+        "row_count": row_count,
+        "from_cache": from_cache,
         "next_actions_zh": next_actions_zh or [],
     }
 
@@ -175,6 +186,10 @@ def build_online_data_source_registry() -> dict[str, Any]:
             fields_provided=["usd_cny", "usd_cny_return", "us10y", "us10y_change", "copper_global_proxy"],
             status=fx_status["status"] if alpha_key.get("configured") else "key_missing",
             last_success_time=str(fx_status.get("last_success_time") or ""),
+            last_attempt_time=str(fx_status.get("last_attempt_time") or ""),
+            cooldown_until=str(fx_status.get("cooldown_until") or ""),
+            row_count=int(fx_status.get("row_count") or 0),
+            from_cache=bool(fx_status.get("from_cache")),
             next_actions_zh=["在设置页配置 Alpha Vantage key；无需上传 CSV/Excel。"] if not alpha_key.get("configured") else ["点击刷新跨市场数据。"],
         ),
         _entry(

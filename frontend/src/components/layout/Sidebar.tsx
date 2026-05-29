@@ -3,6 +3,7 @@ import {
   Activity,
   BarChart3,
   Boxes,
+  Brain,
   Database,
   FileText,
   Gauge,
@@ -16,20 +17,25 @@ import type { PageKey } from "../../App";
 
 const primaryItems: Array<{ key: PageKey; label: string; helper: string; icon: typeof Home }> = [
   { key: "dashboard", label: "总览", helper: "系统、数据、风险", icon: Home },
-  { key: "data", label: "刷新与数据源", helper: "一键刷新与诊断", icon: Database },
-  { key: "events", label: "行情与新闻", helper: "价格图与事件", icon: Newspaper },
-  { key: "predictions", label: "预测观察", helper: "七周期研究观察", icon: Gauge },
-  { key: "backtest", label: "回测验证", helper: "Walk-forward 与成本", icon: Activity },
-  { key: "reports", label: "报告中心", helper: "日报、周报、事件报告", icon: FileText },
-  { key: "settings", label: "设置与诊断", helper: "密钥、日志、系统信息", icon: Settings }
+  { key: "market", label: "行情监控", helper: "quote、图表、provider", icon: BarChart3 },
+  { key: "events", label: "新闻与事件", helper: "入模事件与排除原因", icon: Newspaper },
+  { key: "factors", label: "因子研究", helper: "coverage 与 Feature Store", icon: Gauge },
+  { key: "training", label: "训练数据", helper: "v1-v4 manifest", icon: Database },
+  { key: "research", label: "模型研究", helper: "candidate、OOF、gate", icon: Brain },
+  { key: "backtest", label: "回测验证", helper: "收益曲线与压力测试", icon: Activity },
+  { key: "predictions", label: "预测观察", helper: "active-only 观察", icon: ShieldCheck },
+  { key: "reports", label: "报告中心", helper: "报告与 Artifact Center", icon: FileText },
+  { key: "settings", label: "设置与诊断", helper: "密钥、日志、数据源", icon: Settings }
 ];
 
 const advancedItems: Array<{ key: PageKey; label: string; icon: typeof Home }> = [
-  { key: "factors", label: "因子诊断", icon: BarChart3 },
-  { key: "governance", label: "模型治理", icon: ShieldCheck },
-  { key: "research", label: "研究实验室", icon: Activity },
+  { key: "data", label: "数据源诊断", icon: Database },
+  { key: "governance", label: "模型治理明细", icon: ShieldCheck },
   { key: "position", label: "持仓情景", icon: Boxes }
 ];
+
+const legacyNavigationAliases = ["刷新与数据源", "行情与新闻", "因子诊断"];
+void legacyNavigationAliases;
 
 function NavButton({
   current,

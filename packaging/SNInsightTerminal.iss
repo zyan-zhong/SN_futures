@@ -1,5 +1,5 @@
 #define MyAppName "SNInsightTerminal"
-#define MyAppVersion "0.3.3-beta.1"
+#define MyAppVersion "0.3.8-private-research-beta.1"
 #define MyAppPublisher "SNInsightTerminal"
 #define MyAppExeName "SNInsightTerminal.exe"
 
@@ -26,10 +26,10 @@ Name: "{group}\SNInsightTerminal"; Filename: "{app}\{#MyAppExeName}"
 Name: "{userdesktop}\SNInsightTerminal"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
 
 [Tasks]
-Name: "desktopicon"; Description: "创建桌面快捷方式"; GroupDescription: "快捷方式："; Flags: unchecked
+Name: "desktopicon"; Description: "Create desktop shortcut"; GroupDescription: "Shortcuts:"; Flags: unchecked
 
 [Run]
-Filename: "{app}\{#MyAppExeName}"; Description: "启动 SNInsightTerminal"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\{#MyAppExeName}"; Description: "Launch SNInsightTerminal"; Flags: nowait postinstall skipifsilent
 
 [UninstallDelete]
 Type: filesandordirs; Name: "{app}"

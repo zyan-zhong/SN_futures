@@ -1,7 +1,7 @@
 import { useCallback } from "react";
 import type { PageKey } from "../App";
-import { getNewsEvents, getNewsRelevanceDiagnostics, getPriceHistory, refreshNews } from "../api/terminal";
-import type { NewsEventItem, NewsEventsPayload, NewsRelevanceDiagnosticsPayload, PriceHistoryPayload } from "../api/types";
+import { getNewsEvents, getNewsRelevanceDiagnostics, getNewsSourceQualityReport, getPriceHistory, refreshNews } from "../api/terminal";
+import type { NewsEventItem, NewsEventsPayload, NewsRelevanceDiagnosticsPayload, NewsSourceQualityReport, PriceHistoryPayload } from "../api/types";
 import { PriceChart } from "../components/charts/PriceChart";
 import { DataTable } from "../components/common/DataTable";
 import { EmptyState } from "../components/common/EmptyState";
@@ -37,10 +37,15 @@ export function EventPage({
 }) {
   const newsLoader = useCallback(() => getNewsEvents(), []);
   const diagnosticsLoader = useCallback(() => getNewsRelevanceDiagnostics(), []);
+  const sourceQualityLoader = useCallback(() => getNewsSourceQualityReport(), []);
   const priceLoader = useCallback(() => getPriceHistory(), []);
   const { data, error, loading, refresh } = usePolling<NewsEventsPayload>(newsLoader, 60000);
   const { data: relevanceDiagnostics, refresh: refreshDiagnostics } = usePolling<NewsRelevanceDiagnosticsPayload>(
     diagnosticsLoader,
+    60000
+  );
+  const { data: sourceQualityReport, refresh: refreshSourceQuality } = usePolling<NewsSourceQualityReport>(
+    sourceQualityLoader,
     60000
   );
   const { data: priceHistory, refresh: refreshPriceHistory } = usePolling<PriceHistoryPayload>(priceLoader, 60000);
@@ -51,6 +56,7 @@ export function EventPage({
     await refreshNews();
     void refresh();
     void refreshDiagnostics();
+    void refreshSourceQuality();
     void refreshPriceHistory();
   }
 
@@ -69,6 +75,7 @@ export function EventPage({
     used_in_model_count: stats.used_in_model_count || 0,
     avg_relevance: stats.avg_relevance || 0
   }));
+  const sourceQualityRows = sourceQualityReport?.domains || [];
 
   const newsColumns = [
     { key: "title", title: "标题", render: (row: NewsEventItem) => formatNullable(row.title, "未命名新闻") },
@@ -127,6 +134,23 @@ export function EventPage({
           {queryGroupRows.length ? (
             <SectionCard title="Query Group 统计" subtitle="用于判断是哪组 query 返回候选、哪组产生入模事件。">
               <DataTable data={queryGroupRows} columns={queryGroupColumns} />
+            </SectionCard>
+          ) : null}
+          {sourceQualityRows.length ? (
+            <SectionCard title="新闻源质量诊断" subtitle="展示 source reliability、hard evidence、白名单和黑名单影响；来源质量不会绕过沪锡相关性门槛。">
+              <DataTable
+                data={sourceQualityRows as Array<Record<string, unknown>>}
+                columns={[
+                  { key: "domain", title: "Domain" },
+                  { key: "article_count", title: "新闻数", format: "number" as const },
+                  { key: "used_in_model_count", title: "入模数", format: "number" as const },
+                  {
+                    key: "avg_source_reliability",
+                    title: "来源可靠度",
+                    render: (row: Record<string, unknown>) => formatNumber(row.avg_source_reliability as number, 2)
+                  }
+                ]}
+              />
             </SectionCard>
           ) : null}
           {events.length ? (

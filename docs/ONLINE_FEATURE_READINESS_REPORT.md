@@ -1,5 +1,15 @@
 # Online Feature Readiness Report
 
+## Prompt 61S Update
+
+Online readiness now understands Alpha Vantage rate-limit cache states:
+
+- `using_cache_rate_limited` means Alpha is currently limited but a recent successful cross-market cache is being used.
+- `cooldown_until` is surfaced for the next retry window.
+- Field readiness includes `from_cache`, `stale`, aligned non-null count, and aligned non-null rate.
+
+If no non-empty cache exists, cross-market fields remain unavailable and the report keeps the explicit blocking reason instead of raising coverage.
+
 This report documents the online feature-readiness layer through Prompt 57S. It only audits data availability, alignment, and research readiness. It does not train an active model, generate customer predictions, use baseline logic, or fabricate missing fields.
 
 ## Customer Data Path

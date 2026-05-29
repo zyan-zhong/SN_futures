@@ -28,6 +28,7 @@ EVENT_FACTOR_INPUT_FIELDS = (
     "inventory_shock_score",
     "macro_risk_score",
     "exchange_event_score",
+    "source_reliability_weighted_score",
     "event_recency_decay_score",
     "max_relevance_score",
     "avg_relevance_score",

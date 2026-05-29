@@ -1,5 +1,16 @@
 # Cross-Market Data Alignment Audit
 
+## Prompt 61S Update
+
+Alpha Vantage rate-limit handling now uses an endpoint-aware backfill manager. `rate_limited`, `key_invalid`, `network_failed`, and `schema_mismatch` responses no longer overwrite a non-empty `sn_cross_market.json`. Successful endpoint refreshes write `last_good_cross_market.json`; later limited refreshes use `using_cache_rate_limited` and keep coverage available if the cached rows still align to SN trading dates.
+
+New runtime files:
+
+- `fundamentals/last_good_cross_market.json`
+- `fundamentals/alpha_attempt_history.json`
+
+The coverage layer now exposes `from_cache`, `stale`, `cooldown_until`, exact overlap, aligned non-null count, and blocking reasons through `cross_market_diagnostics`.
+
 This audit documents Prompt 57S. It only covers Alpha Vantage cross-market data integrity, cache protection, temporal alignment, feature coverage, and training-dataset feature inclusion. It does not train a model, publish an active model, generate customer predictions, or use baseline/fake prediction logic.
 
 ## Runtime Snapshot

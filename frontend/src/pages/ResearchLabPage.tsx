@@ -6,12 +6,14 @@ import {
   getThresholdOptimization,
   optimizeResearchStrategy,
   runCandidateV3Research,
+  runCandidateV4Research,
   runModelExperiment
 } from "../api/terminal";
 import type {
   ModelResearchExperimentDetail,
   ModelResearchExperimentList,
   CandidateV3ResearchPayload,
+  CandidateV4ResearchPayload,
   ResearchArtifactsPayload,
   StrategyOptimizationPayload,
   ThresholdOptimizationPayload
@@ -66,6 +68,7 @@ export function ResearchLabPage() {
   const [detail, setDetail] = useState<ModelResearchExperimentDetail | null>(null);
   const [thresholds, setThresholds] = useState<ThresholdOptimizationPayload | null>(null);
   const [candidateV3, setCandidateV3] = useState<CandidateV3ResearchPayload | null>(null);
+  const [candidateV4, setCandidateV4] = useState<CandidateV4ResearchPayload | null>(null);
   const [strategyOptimization, setStrategyOptimization] = useState<StrategyOptimizationPayload | null>(null);
   const [artifacts, setArtifacts] = useState<ResearchArtifactsPayload | null>(null);
   const [loading, setLoading] = useState(false);
@@ -146,6 +149,29 @@ export function ResearchLabPage() {
       setMessage(result.message_zh ?? "candidate_v3 研究流程已完成。");
     } catch (err) {
       setError(err instanceof Error ? err.message : "candidate_v3 研究流程运行失败。");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleRunCandidateV4() {
+    setLoading(true);
+    setError(null);
+    setMessage(null);
+    try {
+      const result = await runCandidateV4Research({ horizons: ["1d", "3d", "5d", "10d", "20d"] });
+      setCandidateV4(result);
+      if (result.status !== "blocked") {
+        const [optimizationPayload, artifactsPayload] = await Promise.all([
+          optimizeResearchStrategy({ candidate_version: "v4", horizons: ["1d", "3d", "5d", "10d", "20d"] }),
+          getResearchArtifacts(result.artifact_run_id)
+        ]);
+        setStrategyOptimization(optimizationPayload);
+        setArtifacts(artifactsPayload);
+      }
+      setMessage(result.message_zh ?? result.reason_zh ?? "candidate_v4 research flow finished.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "candidate_v4 research flow failed.");
     } finally {
       setLoading(false);
     }
@@ -291,6 +317,53 @@ export function ResearchLabPage() {
                 <td>research only</td>
                 <td>{candidateV3?.promotion_dry_run?.status ?? "等待运行"}</td>
                 <td>{candidateV3?.active_updated ? "unexpected" : "not written"}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </SectionCard>
+      <SectionCard
+        title="candidate_v4 readiness and research"
+        subtitle="v4 only runs when real cross-market or event incremental fields pass the coverage gate; otherwise it returns a blocking reason."
+        actions={<button className="secondary-button" type="button" onClick={handleRunCandidateV4} disabled={loading}>Run candidate_v4</button>}
+      >
+        <div className="notice-card">
+          <strong>Research boundary</strong>
+          <span>candidate_v4 does not write active_model.json, does not generate customer predictions, and does not lower the promotion gate.</span>
+        </div>
+        <div className="metric-grid">
+          <div className="metric-card">
+            <span>v4 readiness</span>
+            <strong>{candidateV4?.status ?? "not_run"}</strong>
+          </div>
+          <div className="metric-card">
+            <span>incremental fields</span>
+            <strong>{candidateV4?.incremental_feature_cols?.length ?? 0}</strong>
+          </div>
+          <div className="metric-card">
+            <span>promotion dry-run</span>
+            <strong>{candidateV4?.promotion_dry_run?.status ?? "not_run"}</strong>
+          </div>
+        </div>
+        {candidateV4?.status === "blocked" ? (
+          <div className="empty-state">{candidateV4.reason_zh ?? "No real incremental cross-market/event fields were available, so candidate_v4 was not trained."}</div>
+        ) : null}
+        <div className="data-table-wrap">
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>Version</th>
+                <th>New fields</th>
+                <th>Artifacts</th>
+                <th>Active</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>v1/v2/v3/v4 comparison</td>
+                <td>{candidateV4?.incremental_feature_cols?.join(", ") || "blocked or not_run"}</td>
+                <td>{candidateV4?.artifact_dir ?? "not_ready"}</td>
+                <td>{candidateV4?.active_updated ? "unexpected" : "not written"}</td>
               </tr>
             </tbody>
           </table>

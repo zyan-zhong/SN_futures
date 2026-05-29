@@ -48,20 +48,87 @@ export function PredictionPage({
   const forecastLoader = useCallback(() => getForecastPath(), []);
   const { data: forecastPath, refresh: refreshForecastPath } = usePolling<ForecastPathPayload>(forecastLoader, 60000);
   const predictions = snapshot?.predictions || [];
+  const hasActive = Boolean(snapshot?.model_health?.active_model);
   const visibleForecastPath = forecastPath?.sample_mode && !showSampleData ? { ...forecastPath, points: [] } : forecastPath;
   const visible = filterCards(predictions, group);
+  const candidateReasons = snapshot?.model_health?.failure_reasons || snapshot?.learning_status?.failure_reasons || [];
 
-  async function runPredictionRefresh(kind: "all" | "predictions") {
-    setTaskMessage(kind === "all" ? "正在执行一键刷新数据..." : "正在生成预测...");
-    const result = kind === "all" ? await refreshAll() : await refreshPredictions();
+  async function runDataRefresh() {
+    setTaskMessage("正在刷新真实数据...");
+    const result = await refreshAll();
     setTaskMessage(result.message_zh || "刷新任务已完成。");
+    onRefresh?.();
+    void refreshForecastPath();
+  }
+
+  async function runActivePredictionRefresh() {
+    if (!hasActive) {
+      setTaskMessage("暂无通过 promotion gate 的 active model，未生成客户预测。");
+      return;
+    }
+    setTaskMessage("正在刷新 active prediction...");
+    const result = await refreshPredictions();
+    setTaskMessage(result.message_zh || "active prediction 刷新完成。");
     onRefresh?.();
     void refreshForecastPath();
   }
 
   return (
     <div className="page-stack">
-      <SectionCard title="七周期预测" subtitle="按周期查看方向、概率、收益、风险、事件证据和路径守门。">
+      <SectionCard
+        title="预测观察"
+        subtitle="只展示通过 promotion gate 的真实 active prediction；不显示 baseline，不默认展示交易点位。"
+      >
+        <div className="notice-card">
+          <strong>{hasActive ? "Active model 已存在" : "暂无通过 promotion gate 的 active model"}</strong>
+          <p>
+            {hasActive
+              ? "本页仅观察 active model 输出；研究 candidate、OOF 和回测请到模型研究与回测验证页。"
+              : "最近 candidate 未通过严格 promotion gate，因此不生成客户预测。请查看模型研究、回测验证和数据覆盖。"}
+          </p>
+          {candidateReasons.length ? (
+            <p>最近失败原因：{candidateReasons.slice(0, 4).join("；")}</p>
+          ) : null}
+        </div>
+        <div className="button-row">
+          <button className="primary-button" type="button" onClick={() => void runDataRefresh()}>
+            一键刷新数据
+          </button>
+          <button className="ghost-button" type="button" onClick={() => void runActivePredictionRefresh()} disabled={!hasActive}>
+            生成预测（active only）
+          </button>
+          <button className="ghost-button" type="button" onClick={() => onRefresh?.()}>
+            刷新终端快照
+          </button>
+          <button className="ghost-button" type="button" onClick={() => onNavigate?.("research")}>
+            查看模型研究
+          </button>
+          <button className="ghost-button" type="button" onClick={() => onNavigate?.("governance")}>
+            查看模型治理
+          </button>
+          <button className="ghost-button" type="button" onClick={() => onNavigate?.("backtest")}>
+            查看回测验证
+          </button>
+          <button className="ghost-button" type="button" onClick={() => onNavigate?.("factors")}>
+            查看数据覆盖
+          </button>
+          <button className="ghost-button" type="button" onClick={() => onNavigate?.("data")}>
+            查看数据源状态
+          </button>
+          <button className="ghost-button" type="button" onClick={() => onNavigate?.("settings")}>
+            设置与诊断
+          </button>
+          <button className="ghost-button" type="button" onClick={() => onNavigate?.("settings")}>
+            前往设置
+          </button>
+          <button className="ghost-button" type="button" onClick={() => onNavigate?.("data")}>
+            查看运行期诊断
+          </button>
+          {taskMessage ? <StatusPill label={taskMessage} tone="info" /> : null}
+        </div>
+      </SectionCard>
+
+      <SectionCard title="七周期预测" subtitle="如果没有 active model，本区保持明确空状态，不展示样例或非 active 输出。">
         <div className="horizon-tabs" role="tablist" aria-label="预测周期分组">
           <button className={group === "all" ? "active" : ""} role="tab" aria-selected={group === "all"} type="button" onClick={() => setGroup("all")}>
             全部
@@ -80,42 +147,22 @@ export function PredictionPage({
           ))}
         </div>
         <ErrorBoundary moduleName="七周期预测卡片">
-          {predictions.length ? (
+          {hasActive && predictions.length ? (
             <PredictionGrid predictions={visible} />
           ) : (
             <div className="empty-action-panel">
               <EmptyState label="暂无可用预测结果。请检查数据源配置、模型状态或运行预测任务。" />
-              <div className="button-row">
-                <button className="primary-button" type="button" onClick={() => void runPredictionRefresh("all")}>
-                  一键刷新数据
-                </button>
-                <button className="ghost-button" type="button" onClick={() => void runPredictionRefresh("predictions")}>
-                  生成预测
-                </button>
-                <button className="ghost-button" type="button" onClick={() => window.location.reload()}>
-                  刷新终端快照
-                </button>
-                <button className="ghost-button" type="button" onClick={() => onNavigate?.("settings")}>
-                  前往设置
-                </button>
-                <button className="ghost-button" type="button" onClick={() => onNavigate?.("data")}>
-                  查看数据源状态
-                </button>
-                <button className="ghost-button" type="button" onClick={() => onNavigate?.("governance")}>
-                  查看模型治理
-                </button>
-                <button className="ghost-button" type="button" onClick={() => onNavigate?.("data")}>
-                  查看运行期诊断
-                </button>
-              </div>
-              {taskMessage ? <StatusPill label={taskMessage} tone="info" /> : null}
             </div>
           )}
         </ErrorBoundary>
       </SectionCard>
-      <SectionCard title="预测路径与区间" subtitle="直接读取 /api/terminal/charts/forecast-path；无预测时不画伪路径。">
+      <SectionCard title="预测路径与区间" subtitle="无 active prediction 时不绘制伪路径；有 active 时才展示真实路径。">
         <ErrorBoundary moduleName="预测路径图">
-          <ForecastPathChart forecastPath={visibleForecastPath} />
+          {hasActive ? (
+            <ForecastPathChart forecastPath={visibleForecastPath} />
+          ) : (
+            <EmptyState label="暂无 active prediction path；请先让 candidate 通过 promotion gate 并经过人工审批。" />
+          )}
         </ErrorBoundary>
       </SectionCard>
     </div>

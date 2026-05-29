@@ -96,8 +96,12 @@ def build_news_relevance_diagnostics() -> dict[str, Any]:
                 "query_group": str(item.get("query_group") or "unknown"),
                 "relevance_score": float(item.get("relevance_score") or 0.0),
                 "tin_entity_score": float(item.get("tin_entity_score") or 0.0),
+                "hard_evidence_score": float(item.get("hard_evidence_score") or 0.0),
+                "source_reliability_score": float(item.get("source_reliability_score") or 0.0),
+                "source_domain": str(item.get("source_domain") or ""),
                 "category": str(item.get("category") or "irrelevant"),
                 "used_in_model": bool(item.get("used_in_model")),
+                "inclusion_reason": str(item.get("inclusion_reason") or ""),
                 "exclusion_reason": str(item.get("exclusion_reason") or ""),
                 "keyword_hits": item.get("keyword_hits") if isinstance(item.get("keyword_hits"), list) else [],
                 "negative_keyword_hits": item.get("negative_keyword_hits")

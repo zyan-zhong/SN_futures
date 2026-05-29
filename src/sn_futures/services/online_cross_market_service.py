@@ -227,6 +227,26 @@ def test_alpha_vantage_connection(provider: AlphaVantageProvider | None = None) 
 
 
 def refresh_online_cross_market_data(provider: AlphaVantageProvider | None = None, force: bool = False) -> dict[str, Any]:
+    from .cross_market_backfill_service import ENDPOINTS, refresh_cross_market_backfill
+
+    # Keep the public entrypoint stable while moving runtime refresh to the
+    # endpoint-aware backfill manager.  Injected test providers may exercise all
+    # endpoints in one run; live refresh-all uses the manager's batching default.
+    result = refresh_cross_market_backfill(
+        provider=provider,
+        force=force,
+        max_endpoints_per_run=len(ENDPOINTS) if provider is not None else None,
+    )
+    if provider is not None and result.get("status") == "using_cache_rate_limited":
+        result = dict(result)
+        result["status"] = "rate_limited"
+    if provider is not None and result.get("status") == "using_cache":
+        attempt_codes = {str(item.get("error_code") or item.get("status") or "") for item in result.get("provider_attempts", []) if isinstance(item, dict)}
+        if "key_invalid" in attempt_codes:
+            result = dict(result)
+            result["status"] = "key_invalid"
+    return result
+
     _ = force
     provider = provider or AlphaVantageProvider()
     out = _fundamentals_dir()

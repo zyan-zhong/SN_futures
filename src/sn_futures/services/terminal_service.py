@@ -564,6 +564,30 @@ def _normalise_news_event(row: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+def _normalise_news_event(row: Mapping[str, Any]) -> dict[str, Any]:  # type: ignore[no-redef]
+    return {
+        "title": _text(row.get("title"), "未命名新闻"),
+        "source": _text(row.get("source"), "数据暂缺"),
+        "published_at": _text(row.get("published_at") or row.get("publishedAt"), "本周期未更新"),
+        "url": _text(row.get("url") or row.get("canonical_url") or row.get("raw_url"), ""),
+        "category": _text(row.get("category"), "other"),
+        "sentiment_score": _to_float(row.get("sentiment_score")),
+        "impact_score": _to_float(row.get("impact_score") or row.get("final_event_weight")),
+        "relevance_score": _to_float(row.get("relevance_score")),
+        "hard_evidence_score": _to_float(row.get("hard_evidence_score")),
+        "source_reliability_score": _to_float(row.get("source_reliability_score")),
+        "source_domain": _text(row.get("source_domain"), ""),
+        "domain_blacklist_penalty": _to_float(row.get("domain_blacklist_penalty")),
+        "allowed_for_event_factor": bool(row.get("allowed_for_event_factor", row.get("used_in_model", False))),
+        "used_in_model": bool(row.get("used_in_model", False)),
+        "inclusion_reason": _text(row.get("inclusion_reason"), ""),
+        "exclusion_reason": _text(row.get("exclusion_reason"), ""),
+        "keyword_hits": row.get("keyword_hits") if isinstance(row.get("keyword_hits"), list) else [],
+        "negative_keyword_hits": row.get("negative_keyword_hits") if isinstance(row.get("negative_keyword_hits"), list) else [],
+        "summary_zh": _text(row.get("summary") or row.get("summary_zh") or row.get("description"), "暂无摘要"),
+    }
+
+
 def build_terminal_news_events() -> dict[str, Any]:
     env = load_environment_config()
     events_dir = _runtime_output_dir() / "events"

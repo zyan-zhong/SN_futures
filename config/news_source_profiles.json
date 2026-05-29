@@ -1,0 +1,39 @@
+{
+  "whitelist_domains": [
+    "mining.com",
+    "kitco.com",
+    "reuters.com",
+    "argusmedia.com",
+    "fastmarkets.com",
+    "lme.com",
+    "shfe.com.cn",
+    "metalbulletin.com",
+    "spglobal.com",
+    "smm.cn",
+    "mysteel.net"
+  ],
+  "blacklist_domains": [
+    "macworld.com",
+    "pypi.org",
+    "apple.com",
+    "github.com",
+    "medium.com",
+    "substack.com",
+    "espn.com",
+    "sports.yahoo.com",
+    "variety.com",
+    "entertainmentweekly.com"
+  ],
+  "generic_blacklist_terms": [
+    "software",
+    "python package",
+    "app store",
+    "sports",
+    "entertainment",
+    "tin can",
+    "canned food",
+    "home decor",
+    "audio dac"
+  ],
+  "legal_note": "Profiles are used only for relevance filtering and source diagnostics. They do not bypass paywalls or imply full-text access."
+}

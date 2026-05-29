@@ -31,6 +31,7 @@ export function FactorPage({ showSampleData = true }: { showSampleData?: boolean
   const coverageLoader = useCallback(() => getFeatureCoverage(), []);
   const onlineReadinessLoader = useCallback(() => getOnlineFeatureReadiness(), []);
   const featureStoreLoader = useCallback(() => getFeatureStoreStatus("v3"), []);
+  const featureStoreV4Loader = useCallback(() => getFeatureStoreStatus("v4"), []);
   const [featureStoreBuilding, setFeatureStoreBuilding] = useState(false);
   const [featureStoreActionError, setFeatureStoreActionError] = useState("");
   const { data, error, loading, refresh } = usePolling<FactorDiagnosticsPayload>(diagnosticsLoader, 60000);
@@ -52,6 +53,10 @@ export function FactorPage({ showSampleData = true }: { showSampleData?: boolean
     loading: featureStoreLoading,
     refresh: refreshFeatureStore,
   } = usePolling<FeatureStoreStatus>(featureStoreLoader, 60000);
+  const {
+    data: featureStoreV4,
+    refresh: refreshFeatureStoreV4,
+  } = usePolling<FeatureStoreStatus>(featureStoreV4Loader, 60000);
   const groups = data?.sample_mode && !showSampleData ? [] : data?.groups || [];
   const coverageGroups = coverage?.groups || [];
   const usableCount = coverage?.usable_feature_cols?.length || 0;
@@ -62,7 +67,7 @@ export function FactorPage({ showSampleData = true }: { showSampleData?: boolean
     setFeatureStoreActionError("");
     try {
       await buildFeatureStore({ version: "v3" });
-      await Promise.all([refreshFeatureStore(), refreshCoverage(), refreshOnlineReadiness()]);
+      await Promise.all([refreshFeatureStore(), refreshFeatureStoreV4(), refreshCoverage(), refreshOnlineReadiness()]);
     } catch (err) {
       setFeatureStoreActionError(err instanceof Error ? err.message : "Feature Store v3 构建失败");
     } finally {
@@ -100,11 +105,28 @@ export function FactorPage({ showSampleData = true }: { showSampleData?: boolean
             <small>{(featureStore?.excluded_fields || []).slice(0, 4).join("、") || "暂无"}</small>
           </div>
         </div>
+        <div className="metric-grid compact">
+          <div className="metric-card">
+            <span className="metric-label">Feature Store v3 manifest</span>
+            <strong>{featureStore?.exists ? "ready" : "not_ready"}</strong>
+            <small>{featureStore?.manifest_path || "manifest not built"}</small>
+          </div>
+          <div className="metric-card">
+            <span className="metric-label">Feature Store v4 status</span>
+            <strong>{featureStoreV4?.status || "not_ready"}</strong>
+            <small>{featureStoreV4?.message_zh || featureStoreV4?.manifest_path || "requires real incremental fields"}</small>
+          </div>
+          <div className="metric-card">
+            <span className="metric-label">v4 usable_fields</span>
+            <strong>{featureStoreV4?.usable_fields?.length || 0}</strong>
+            <small>{(featureStoreV4?.usable_fields || []).slice(0, 4).join(", ") || "blocked or empty"}</small>
+          </div>
+        </div>
         <div className="button-row">
           <button type="button" className="primary-button" onClick={buildStore} disabled={featureStoreBuilding}>
             {featureStoreBuilding ? "正在构建..." : "一键构建 Feature Store"}
           </button>
-          <button type="button" className="secondary-button" onClick={refreshFeatureStore}>
+          <button type="button" className="secondary-button" onClick={() => void Promise.all([refreshFeatureStore(), refreshFeatureStoreV4()])}>
             刷新状态
           </button>
           <span className="status-pill status-info">不生成预测</span>
@@ -237,6 +259,21 @@ export function FactorPage({ showSampleData = true }: { showSampleData?: boolean
               <span className="status-pill status-warning">
                 完整基本面模型：{coverage?.training_readiness?.can_train_full_fundamental_model ? "具备条件" : "暂不具备"}
               </span>
+            </div>
+
+            <div className="notice-card">
+              <strong>cross_market_diagnostics</strong>
+              <p>
+                日期范围：{formatNullable(coverage?.cross_market_diagnostics?.date_start)} 至{" "}
+                {formatNullable(coverage?.cross_market_diagnostics?.date_end)}；交集：
+                {coverage?.cross_market_diagnostics?.exact_date_overlap_count ?? 0}；对齐非空：
+                {coverage?.cross_market_diagnostics?.aligned_non_null_count ?? 0}；stale：
+                {coverage?.cross_market_diagnostics?.stale_row_count ?? 0}。
+              </p>
+              <p>
+                from_cache / stale 状态会在 rate_limited 或 using_cache_rate_limited 时解释字段是否来自最近成功缓存；排除原因：
+                {(coverage?.cross_market_diagnostics?.blocking_reasons || []).join("、") || "暂无"}。
+              </p>
             </div>
 
             {coverage?.blocking_missing_fields?.length ? (

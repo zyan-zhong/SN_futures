@@ -74,7 +74,9 @@ from ..services.research_artifact_service import get_research_artifacts
 from ..services.research_backtest_service import get_research_backtest_report, get_research_equity_curve, run_research_backtest
 from ..services.research_strategy_optimizer import get_strategy_optimization_report, optimize_research_strategy
 from ..services.research_v3_service import run_candidate_v3_research
+from ..services.feature_store_v4_service import build_feature_store_v4, run_candidate_v4_research
 from ..services.news_relevance_diagnostics_service import build_news_relevance_diagnostics
+from ..services.news_source_quality_service import build_source_quality_report
 from ..services.online_data_source_registry import build_online_data_source_registry
 from ..services.provider_observability_service import (
     export_diagnostics_bundle,
@@ -109,6 +111,7 @@ TERMINAL_API_DOCS = {
         {"method": "GET", "path": "/api/terminal/events/news", "description": "????????? provider ???"},
         {"method": "GET", "path": "/api/terminal/events/relevance-report", "description": "返回 NewsAPI 新闻相关性过滤报告，区分入模、仅展示和已排除新闻。"},
         {"method": "GET", "path": "/api/terminal/events/relevance-diagnostics", "description": "返回 NewsAPI query group、关键词命中和排除原因诊断。"},
+        {"method": "GET", "path": "/api/terminal/events/source-quality-report", "description": "返回新闻源白名单、黑名单和 source reliability 诊断。"},
         {"method": "GET", "path": "/api/terminal/events/evidence", "description": "???????????"},
         {"method": "GET", "path": "/api/terminal/reports/full", "description": "???????? Markdown ???"},
         {"method": "GET", "path": "/api/terminal/factors/diagnostics", "description": "??????????????????"},
@@ -180,6 +183,7 @@ TERMINAL_API_DOCS["endpoints"].extend(
         {"method": "GET", "path": "/api/terminal/online-data-sources/status", "description": "返回在线数据源 registry；客户不需要 CSV/Excel，系统自动尝试公开源、key 源和可选托管源。"},
         {"method": "GET", "path": "/api/terminal/research/oof-trace-summary", "description": "读取研究实验 OOF 样本外验证轨迹摘要。"},
         {"method": "POST", "path": "/api/terminal/research/run-candidate-v3", "description": "运行 candidate_v3 研究流程，生成 OOF、机构级验证、研究回测和归档；不发布 active、不生成客户预测。"},
+        {"method": "POST", "path": "/api/terminal/research/run-candidate-v4", "description": "仅当真实 cross-market/event 增量字段达标时运行 candidate_v4；否则返回阻断原因，不训练、不发布 active。"},
         {"method": "POST", "path": "/api/terminal/research/run-backtest", "description": "基于 OOF trace 生成研究型收益曲线、回撤曲线和交易列表；不是客户预测。"},
         {"method": "GET", "path": "/api/terminal/research/backtest-report", "description": "读取研究型回测 Markdown 报告。"},
         {"method": "GET", "path": "/api/terminal/research/equity-curve", "description": "读取研究型 OOF 收益曲线。"},
@@ -277,6 +281,8 @@ def handle_terminal_api(
             return _ok(payload or {"message_zh": "暂无新闻相关性报告，请先刷新新闻。", "used_in_model_count": 0, "rejected_count": 0})
         if path == "/api/terminal/events/relevance-diagnostics":
             return _ok(build_news_relevance_diagnostics())
+        if path == "/api/terminal/events/source-quality-report":
+            return _ok(build_source_quality_report())
         if path == "/api/terminal/events/evidence":
             return _ok(build_terminal_event_evidence(_query_value(query, "horizon", "tomorrow")))
         if path == "/api/terminal/reports/full":
@@ -318,22 +324,25 @@ def handle_terminal_api(
         if path == "/api/terminal/research/oof-trace-summary":
             return _ok(get_research_oof_trace_summary(_query_value(query, "id", "")))
         if path == "/api/terminal/research/backtest-report":
+            report_version = _query_value(query, "candidate_version", None) or _query_value(query, "version", "v3") or "v3"
             return _ok(
                 get_research_backtest_report(
                     run_id=_query_value(query, "run_id", None),
-                    candidate_version=_query_value(query, "candidate_version", "v3") or "v3",
+                    candidate_version=report_version,
                 )
             )
         if path == "/api/terminal/research/equity-curve":
+            curve_version = _query_value(query, "candidate_version", None) or _query_value(query, "version", "v3") or "v3"
             return _ok(
                 get_research_equity_curve(
                     run_id=_query_value(query, "run_id", None),
                     horizon=_query_value(query, "horizon", "1d") or "1d",
-                    candidate_version=_query_value(query, "candidate_version", "v3") or "v3",
+                    candidate_version=curve_version,
                 )
             )
         if path == "/api/terminal/research/artifacts":
-            return _ok(get_research_artifacts(run_id=_query_value(query, "run_id", None)))
+            artifact_version = _query_value(query, "candidate_version", None) or _query_value(query, "version", None)
+            return _ok(get_research_artifacts(run_id=_query_value(query, "run_id", None), candidate_version=artifact_version))
         if path == "/api/terminal/validation/report":
             return _ok(get_institutional_validation_report(candidate_version=_query_value(query, "candidate_version", "v1") or "v1"))
         if path == "/api/terminal/validation/stress-tests":
@@ -403,7 +412,10 @@ def handle_terminal_api(
             payload, error = _parse_body(body)
             if error is not None:
                 return 400, error
-            return _ok(build_feature_store(version=str((payload or {}).get("version") or "v3")))
+            version = str((payload or {}).get("version") or "v3")
+            if version.lower() == "v4":
+                return _ok(build_feature_store_v4())
+            return _ok(build_feature_store(version=version))
         if path == "/api/terminal/training-dataset/build":
             payload, error = _parse_body(body)
             if error is not None:
@@ -453,16 +465,23 @@ def handle_terminal_api(
             raw_horizons = (payload or {}).get("horizons") or ["1d", "3d", "5d", "10d", "20d"]
             horizons = [str(item) for item in raw_horizons] if isinstance(raw_horizons, list) else ["1d", "3d", "5d", "10d", "20d"]
             return _ok(run_candidate_v3_research(horizons=horizons))
+        if path == "/api/terminal/research/run-candidate-v4":
+            payload, _ = _parse_body(body)
+            raw_horizons = (payload or {}).get("horizons") or ["1d", "3d", "5d", "10d", "20d"]
+            horizons = [str(item) for item in raw_horizons] if isinstance(raw_horizons, list) else ["1d", "3d", "5d", "10d", "20d"]
+            return _ok(run_candidate_v4_research(horizons=horizons))
         if path == "/api/terminal/research/run-backtest":
             payload, _ = _parse_body(body)
             raw_horizons = (payload or {}).get("horizons") or ["1d", "3d", "5d", "10d", "20d"]
             horizons = [str(item) for item in raw_horizons] if isinstance(raw_horizons, list) else ["1d", "3d", "5d", "10d", "20d"]
-            return _ok(run_research_backtest(candidate_version=str((payload or {}).get("candidate_version") or "v3"), horizons=horizons))
+            version = str((payload or {}).get("candidate_version") or (payload or {}).get("version") or _query_value(query, "version", "v3") or "v3")
+            return _ok(run_research_backtest(candidate_version=version, horizons=horizons))
         if path == "/api/terminal/research/optimize-strategy":
             payload, _ = _parse_body(body)
             raw_horizons = (payload or {}).get("horizons") or ["1d", "3d", "5d", "10d", "20d"]
             horizons = [str(item) for item in raw_horizons] if isinstance(raw_horizons, list) else ["1d", "3d", "5d", "10d", "20d"]
-            return _ok(optimize_research_strategy(candidate_version=str((payload or {}).get("candidate_version") or "v3"), horizons=horizons))
+            version = str((payload or {}).get("candidate_version") or (payload or {}).get("version") or _query_value(query, "version", "v3") or "v3")
+            return _ok(optimize_research_strategy(candidate_version=version, horizons=horizons))
         if path == "/api/terminal/validation/run-institutional-check":
             payload, _ = _parse_body(body)
             return _ok(run_institutional_validation(candidate_version=str((payload or {}).get("candidate_version") or "v1"), dry_run=bool((payload or {}).get("dry_run"))))

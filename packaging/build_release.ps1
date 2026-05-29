@@ -5,7 +5,7 @@
   [string]$NpmPath = "",
   [switch]$SkipInstaller,
   [switch]$SkipSmoke,
-  [string]$Version = "0.3.3-beta.1",
+  [string]$Version = "0.3.8-private-research-beta.1",
   [switch]$CleanRelease,
   [switch]$PrivateBundleKeys,
   [string]$PrivateKeysFile = "packaging/private_release_keys.json",

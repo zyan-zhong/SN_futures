@@ -22,4 +22,18 @@ The research backtest uses only out-of-fold validation traces. It is not a live 
 - No active model is published.
 - No customer prediction is generated.
 - Metrics include cost stress, drawdown, DSR, PBO, and a lightweight Reality Check p-value.
+# v4 selector
 
+The research backtest API and UI now support `candidate_version=v4` or `version=v4`.
+
+v4 backtests are only meaningful after candidate_v4 creates OOF traces. If Feature Store v4 is blocked due to no real cross-market or event increment, the backtest remains unavailable and no customer prediction is generated.
+
+The output directory is `outputs/research_backtests/v4/`:
+
+- `equity_curve_*.csv`
+- `drawdown_curve_*.csv`
+- `trades_*.csv`
+- `metrics_*.json`
+- `research_backtest_report.md`
+
+These files are research-only and do not imply active model approval.

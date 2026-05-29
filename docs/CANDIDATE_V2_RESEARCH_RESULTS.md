@@ -1,5 +1,9 @@
 # Candidate v2 Research Results
 
+## Prompt 61S Note
+
+Prompt 61S does not train candidate_v2 again. It fixes the data path that previously left candidate_v2 without real cross-market fields. A future candidate should only be trained after `sn_cross_market.json` or `last_good_cross_market.json` contains real rows that align to SN trading dates and pass feature coverage thresholds.
+
 This document records the current candidate v2 research status after Prompt 57S cross-market alignment fixes. Prompt 57S did not train a model, did not publish an active model, did not generate customer predictions, and did not use baseline or fake prediction logic.
 
 ## Prompt 57S Correction

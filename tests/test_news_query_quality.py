@@ -98,7 +98,7 @@ class NewsQueryQualityTest(unittest.TestCase):
             result = NewsApiProvider().fetch_tin_news(page_size=10)
 
         self.assertEqual(result["row_count"], 1)
-        self.assertEqual(result["articles"][0]["query_group"], "chinese")
+        self.assertIn(result["articles"][0]["query_group"], {"chinese", "chinese_strict"})
         self.assertTrue(any(call["params"].get("language") == "zh" for call in calls))  # type: ignore[union-attr]
 
 

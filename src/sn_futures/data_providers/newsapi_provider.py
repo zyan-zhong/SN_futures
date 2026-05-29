@@ -11,6 +11,35 @@ from ..utils.secret_sanitizer import sanitize_mapping, sanitize_text
 
 NEWS_QUERY_PROFILES: tuple[dict[str, str], ...] = (
     {
+        "group": "exchange_inventory",
+        "language": "en",
+        "query": '("LME tin" OR "SHFE tin" OR "Shanghai tin") AND '
+        "(inventory OR warehouse OR stockpile OR stocks)",
+    },
+    {
+        "group": "supply_asia_strict",
+        "language": "en",
+        "query": '(tin AND (Indonesia OR Myanmar OR "Wa State" OR "Man Maw")) AND '
+        "(mine OR smelter OR export OR quota OR suspension OR supply)",
+    },
+    {
+        "group": "futures_price",
+        "language": "en",
+        "query": '("SHFE tin" OR "Shanghai tin futures" OR "沪锡" OR "锡期货") AND '
+        "(price OR futures OR open interest OR volume)",
+    },
+    {
+        "group": "demand_electronics",
+        "language": "en",
+        "query": "(tin AND (solder OR semiconductor OR PCB OR photovoltaic OR electronics)) AND "
+        "(demand OR shortage OR inventory)",
+    },
+    {
+        "group": "chinese_strict",
+        "language": "zh",
+        "query": '("沪锡" OR "上期所锡" OR "锡库存" OR "锡升贴水" OR "缅甸锡" OR "印尼锡")',
+    },
+    {
         "group": "core_english",
         "language": "en",
         "query": '("tin" OR "LME tin" OR "SHFE tin" OR "Shanghai tin") AND '

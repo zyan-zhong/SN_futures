@@ -157,7 +157,7 @@ def archive_research_run(
     return sanitize_for_json(index)
 
 
-def get_research_artifacts(*, run_id: str | None = None) -> dict[str, Any]:
+def get_research_artifacts(*, run_id: str | None = None, candidate_version: str | None = None) -> dict[str, Any]:
     base = _output_dir() / "research_runs"
     if run_id:
         archive_dir = base / Path(run_id).name
@@ -168,13 +168,18 @@ def get_research_artifacts(*, run_id: str | None = None) -> dict[str, Any]:
         return sanitize_for_json({"status": "success", **dict(index), "artifacts": files})
     if not base.exists():
         return {"status": "empty", "runs": [], "count": 0}
+    version_filter = _normalise_version(candidate_version) if candidate_version else ""
     runs = []
     for path in sorted(base.iterdir(), reverse=True):
         if not path.is_dir():
             continue
         index = _read_json(path / "artifact_index.json")
         if isinstance(index, Mapping):
+            if version_filter and str(index.get("candidate_version") or "").lower() != version_filter:
+                continue
             runs.append(dict(index))
         else:
+            if version_filter and not path.name.lower().startswith(f"{version_filter}_"):
+                continue
             runs.append({"run_id": path.name, "artifact_dir": str(path), "status": "unknown"})
     return sanitize_for_json({"status": "success", "runs": runs, "count": len(runs)})

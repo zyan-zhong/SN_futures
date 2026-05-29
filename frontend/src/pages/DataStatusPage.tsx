@@ -121,7 +121,10 @@ export function DataStatusPage({
               { key: "requires_paid_account", title: "是否需要托管/付费源", render: (row) => (row.requires_paid_account ? "可能需要" : "否") },
               { key: "client_upload_required", title: "是否需要客户上传文件", render: () => "否" },
               { key: "status", title: "状态" },
+              { key: "row_count", title: "行数" },
+              { key: "from_cache", title: "缓存", render: (row) => (row.from_cache ? "使用缓存" : "否") },
               { key: "last_success_time", title: "最近成功时间" },
+              { key: "cooldown_until", title: "下次重试", render: (row) => String(row.cooldown_until || "无") },
               { key: "legal_note", title: "当前阻断原因", render: (row) => String(row.legal_note || row.status || "暂无") },
               { key: "next_actions_zh", title: "下一步建议", render: (row) => Array.isArray(row.next_actions_zh) ? row.next_actions_zh.join("；") : "查看诊断" },
             ]}
@@ -129,6 +132,13 @@ export function DataStatusPage({
           <p className="muted">
             当前公开在线源未返回沪锡相关行时，系统不会伪造数据。完整 LME、现货、库存和基差可通过发行方托管数据服务补齐。
           </p>
+          <div className="notice-card">
+            <strong>Alpha Vantage cross-market refresh states</strong>
+            <p>
+              rate_limited / using_cache_rate_limited / cooldown_until / last_success_time 会用于说明 USD/CNY、US10Y 和 copper proxy
+              是最新刷新、使用最近成功缓存，还是正在等待下一次重试窗口。
+            </p>
+          </div>
         </SectionCard>
         <RefreshTaskPanel initialStatus={snapshot?.refresh_status} onAfterRefresh={onRefresh} />
         <RuntimeDiagnosticsPanel />

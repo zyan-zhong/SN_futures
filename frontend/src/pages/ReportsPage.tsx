@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { getFullReport, getReports, refreshReports } from "../api/terminal";
 import type { FullReportPayload, ReportItem } from "../api/types";
+import { ArtifactCenter } from "../components/artifacts/ArtifactCenter";
 import { EmptyState } from "../components/common/EmptyState";
 import { ErrorBoundary } from "../components/common/ErrorBoundary";
 import { ErrorState } from "../components/common/ErrorState";
@@ -61,29 +62,32 @@ export function ReportsPage({ showSampleData = true }: { showSampleData?: boolea
 
   return (
     <ErrorBoundary moduleName="报告中心">
-      {reports.length ? (
-        <div className="page-stack">
-          <div className="button-row">
+      <div className="page-stack">
+        {reports.length ? (
+          <>
+            <div className="button-row">
+              <button className="primary-button" type="button" onClick={() => void generateReports()}>
+                生成报告
+              </button>
+              {fullError ? <StatusPill label={fullError} tone="warn" /> : null}
+              {taskMessage ? <StatusPill label={taskMessage} tone="info" /> : null}
+            </div>
+            <ReportCenter
+              reports={mergeFullReport(reports, fullReport)}
+              onReportSelect={(report) => void loadFullReport(report.type || "daily")}
+            />
+          </>
+        ) : (
+          <div className="empty-action-panel">
+            <EmptyState label="暂无报告，请先运行报告生成任务。" />
             <button className="primary-button" type="button" onClick={() => void generateReports()}>
-              生成报告
+              点击生成报告
             </button>
-            {fullError ? <StatusPill label={fullError} tone="warn" /> : null}
             {taskMessage ? <StatusPill label={taskMessage} tone="info" /> : null}
           </div>
-          <ReportCenter
-            reports={mergeFullReport(reports, fullReport)}
-            onReportSelect={(report) => void loadFullReport(report.type || "daily")}
-          />
-        </div>
-      ) : (
-        <div className="empty-action-panel">
-          <EmptyState label="暂无报告，请先运行报告生成任务。" />
-          <button className="primary-button" type="button" onClick={() => void generateReports()}>
-            点击生成报告
-          </button>
-          {taskMessage ? <StatusPill label={taskMessage} tone="info" /> : null}
-        </div>
-      )}
+        )}
+        <ArtifactCenter />
+      </div>
     </ErrorBoundary>
   );
 }

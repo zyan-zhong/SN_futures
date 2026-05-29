@@ -12,7 +12,7 @@ function Test-SecretLikeLine {
     # High-risk literal assignment/header forms only, including X-Api-Key.
     # Field names such as
     # apiKey/source/token in frontend bundles are not enough to mark leakage.
-    $placeholder = '(\[?masked\]?|\[?redacted\]?|\*{3,}|<[^>]+>|YOUR_|TEST_|example)'
+    $placeholder = '(\[?masked\]?|\[?redacted\]?|\*{3,}|%2A%2A%2A|<[^>]+>|YOUR_|TEST_|example)'
     if ($Text -match '(?i)(?<![A-Za-z0-9_])(apikey|api_key)\s*=\s*(?!' + $placeholder + ')[^&\s,;''"]{8,}') { return $true }
     if ($Text -match '(?i)(?<![A-Za-z0-9_])(x-api-key|authorization)\s*[:=]\s*["'']?(?!' + $placeholder + ')[A-Za-z0-9._\-]{12,}') { return $true }
     if ($Text -match '(?i)Bearer\s+(?!' + $placeholder + ')[A-Za-z0-9._-]{12,}') { return $true }

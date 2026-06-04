@@ -13,14 +13,33 @@ function Invoke-TerminalJson {
   param(
     [string]$Method,
     [string]$Path,
-    [object]$Body = $null
+    [object]$Body = $null,
+    [int]$TimeoutSec = 180
   )
   $uri = "$BaseUrl$Path"
   if ($Body -ne $null) {
     $json = $Body | ConvertTo-Json -Depth 8
-    return Invoke-RestMethod -Method $Method -Uri $uri -Body $json -ContentType "application/json" -TimeoutSec 180
+    return Invoke-RestMethod -Method $Method -Uri $uri -Body $json -ContentType "application/json" -TimeoutSec $TimeoutSec
   }
-  return Invoke-RestMethod -Method $Method -Uri $uri -TimeoutSec 180
+  return Invoke-RestMethod -Method $Method -Uri $uri -TimeoutSec $TimeoutSec
+}
+
+function Invoke-OptionalTerminalJson {
+  param(
+    [string]$Method,
+    [string]$Path,
+    [int]$TimeoutSec = 30
+  )
+  try {
+    return Invoke-TerminalJson -Method $Method -Path $Path -TimeoutSec $TimeoutSec
+  } catch {
+    return [ordered]@{
+      status = "timeout_or_failed"
+      path = $Path
+      message_zh = "Optional diagnostics timed out or failed; market smoke conclusion can still be produced."
+      error_message_zh = $_.Exception.Message
+    }
+  }
 }
 
 $startedProcess = $null
@@ -53,10 +72,10 @@ try {
   $priceHistory = Invoke-TerminalJson -Method GET -Path "/api/terminal/charts/price-history"
 
   Write-Info "Reading runtime diagnostics..."
-  $runtimeDiagnostics = Invoke-TerminalJson -Method GET -Path "/api/terminal/runtime-diagnostics"
+  $runtimeDiagnostics = Invoke-OptionalTerminalJson -Method GET -Path "/api/terminal/runtime-diagnostics" -TimeoutSec 30
 
   Write-Info "Reading provider details..."
-  $providerDetail = Invoke-TerminalJson -Method GET -Path "/api/terminal/providers/status-detail"
+  $providerDetail = Invoke-OptionalTerminalJson -Method GET -Path "/api/terminal/providers/status-detail" -TimeoutSec 30
 
   $outputs = Join-Path $env:LOCALAPPDATA "SNInsightTerminal\logs"
   New-Item -ItemType Directory -Force -Path $outputs | Out-Null

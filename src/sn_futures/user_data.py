@@ -27,6 +27,7 @@ DEFAULT_USER_CONFIG = {
 SECRETS_EXAMPLE = {
     "SN_ALPHA_VANTAGE_KEY": "your_alpha_vantage_api_key_here",
     "SN_NEWSAPI_KEY": "your_newsapi_key_here",
+    "SN_TUSHARE_TOKEN": "your_tushare_token_here",
     "_note": "复制为 secrets.json 并填写本机密钥；不要提交真实密钥。",
 }
 

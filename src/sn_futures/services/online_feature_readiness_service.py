@@ -11,6 +11,7 @@ from ..api.json_utils import sanitize_for_json
 from ..runtime import get_user_output_dir
 from .feature_coverage_service import build_feature_coverage_report
 from .online_data_source_registry import build_online_data_source_registry
+from .provider_status_canonical_service import build_canonical_provider_status
 
 
 FIELD_SOURCES: tuple[dict[str, Any], ...] = (
@@ -125,6 +126,34 @@ FIELD_SOURCES: tuple[dict[str, Any], ...] = (
         "source": "akshare",
         "file": "sn_exchange_daily.json",
         "status_file": "shfe_public_provider_status.json",
+    },
+    {
+        "field": "open_interest",
+        "category": "term_structure",
+        "source": "tushare",
+        "file": "sn_tushare_daily.json",
+        "status_file": "tushare_provider_status.json",
+    },
+    {
+        "field": "settlement",
+        "category": "term_structure",
+        "source": "tushare",
+        "file": "sn_tushare_settlement.json",
+        "status_file": "tushare_provider_status.json",
+    },
+    {
+        "field": "warehouse_receipt",
+        "category": "warehouse_receipt",
+        "source": "tushare",
+        "file": "sn_tushare_warehouse_receipt.json",
+        "status_file": "tushare_provider_status.json",
+    },
+    {
+        "field": "member_net_position",
+        "category": "member_position",
+        "source": "tushare",
+        "file": "sn_tushare_holding.json",
+        "status_file": "tushare_provider_status.json",
     },
 )
 
@@ -334,6 +363,7 @@ def _factor_group_readiness(field_rows: list[dict[str, Any]], coverage: Mapping[
 def build_online_feature_readiness_report() -> dict[str, Any]:
     fundamentals = _fundamentals_dir()
     registry = build_online_data_source_registry()
+    provider_status_canonical = build_canonical_provider_status()
     coverage = build_feature_coverage_report()
     alignment = coverage.get("cross_market_diagnostics") if isinstance(coverage, Mapping) else {}
     field_rows = _apply_cross_market_alignment_status(
@@ -361,6 +391,7 @@ def build_online_feature_readiness_report() -> dict[str, Any]:
             "generated_at": _now(),
             "client_upload_required": False,
             "online_sources": registry.get("sources", []),
+            "provider_status_canonical": provider_status_canonical,
             "field_readiness": field_rows,
             "available_fields": available_fields,
             "unavailable_fields": unavailable_fields,

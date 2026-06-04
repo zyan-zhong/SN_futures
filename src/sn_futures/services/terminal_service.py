@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Mapping
@@ -17,6 +18,7 @@ from ..api.schemas import (
     TerminalSummary,
 )
 from ..config import load_environment_config
+from ..runtime import get_user_output_dir
 
 
 HORIZON_LABELS = {
@@ -39,6 +41,45 @@ def _safe_call(name: str, fn: Callable[[], Any], fallback: Any) -> Any:
         return fn()
     except Exception as exc:
         return {"ok": False, "module": name, "message_zh": f"{name} 暂不可用：{exc}", "error": str(exc), **(fallback or {})}
+
+
+def _read_json(path: Path) -> Any:
+    if not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+
+
+def _tushare_subinterfaces() -> list[dict[str, Any]]:
+    payload = _read_json(get_user_output_dir() / "fundamentals" / "tushare_provider_status.json")
+    results = payload.get("results") if isinstance(payload, Mapping) and isinstance(payload.get("results"), Mapping) else {}
+    rows: list[dict[str, Any]] = []
+    for key, label in (
+        ("tushare_contracts", "contract info"),
+        ("tushare_daily", "daily"),
+        ("tushare_warehouse", "warehouse"),
+        ("tushare_settlement", "settlement"),
+        ("tushare_holding", "holding"),
+    ):
+        item = results.get(key) if isinstance(results, Mapping) else None
+        if not isinstance(item, Mapping):
+            rows.append({"source_name": key, "label": label, "status": "missing", "row_count": 0, "selected_params": {}, "last_success_time": ""})
+            continue
+        rows.append(
+            {
+                "source_name": key,
+                "label": label,
+                "status": item.get("status") or "unknown",
+                "success": bool(item.get("success")),
+                "row_count": int(item.get("row_count") or 0),
+                "selected_params": item.get("selected_params") or item.get("params_sanitized") or {},
+                "last_success_time": item.get("last_success_time") or ((payload.get("generated_at") if isinstance(payload, Mapping) else "") if item.get("success") else "") or "",
+                "error_message_zh": item.get("error_message_zh") or "",
+            }
+        )
+    return rows
 
 
 def _as_float(value: Any, default: float | None = None) -> float | None:
@@ -332,7 +373,7 @@ def build_terminal_data_status() -> dict[str, Any]:
                     stale=not bool(item.get("success", item.get("last_success_time"))),
                 )
             )
-    return sanitize_for_json({"sources": sources, "data_watermark": watermark, "disclaimer": DISCLAIMER})
+    return sanitize_for_json({"sources": sources, "tushare_subinterfaces": _tushare_subinterfaces(), "data_watermark": watermark, "disclaimer": DISCLAIMER})
 
 
 def build_terminal_system_health() -> dict[str, Any]:
@@ -1356,6 +1397,205 @@ def build_terminal_snapshot() -> dict[str, Any]:  # type: ignore[override]
         snapshot["sample_banner_zh"] = summary.get("sample_banner_zh")
     return sanitize_for_json(snapshot)
 
+def _final_canonical_duplicate_source(source: Mapping[str, Any], canonical_ids: set[str]) -> bool:
+    provider_id = str(source.get("provider_id") or "").strip().lower()
+    source_key = str(source.get("source_key") or "").strip().lower()
+    source_name = str(source.get("source_name") or "").strip().lower()
+    if provider_id and provider_id in canonical_ids:
+        return True
+    canonical_aliases = {
+        "market",
+        "market_data",
+        "alpha",
+        "alpha_vantage",
+        "cross_market",
+        "fx_macro",
+        "news",
+        "newsapi",
+        "event",
+        "events",
+        "tushare",
+        "managed_proxy",
+        "managed",
+        "shfe_public",
+        "lme_tin",
+    }
+    if source_key in canonical_aliases:
+        return True
+    return any(
+        token in source_name
+        for token in (
+            "alpha",
+            "newsapi",
+            "tushare",
+            "managed proxy",
+            "managed_proxy",
+            "market data",
+            "lme tin",
+        )
+    )
+
+_CANONICAL_PREVIOUS_BUILD_TERMINAL_DATA_STATUS = build_terminal_data_status
+
+
+def _canonical_source_row(row: Mapping[str, Any]) -> dict[str, Any]:
+    provider_id = str(row.get("provider_id") or "")
+    label = {
+        "market": "Market data",
+        "alpha_vantage": "Alpha Vantage",
+        "newsapi": "NewsAPI",
+        "tushare": "Tushare",
+        "managed_proxy": "Managed Proxy",
+        "shfe_public": "SHFE 公共数据",
+        "lme_tin": "LME tin",
+        "akshare_history": "AKShare history",
+    }.get(provider_id, provider_id or "provider")
+    status = str(row.get("status") or "unknown")
+    success = status == "success"
+    from_cache = bool(row.get("from_cache"))
+    freshness = {
+        "success": "正常",
+        "not_configured": "未配置",
+        "token_missing": "未配置",
+        "key_missing": "未配置",
+        "disabled": "未启用",
+        "using_cache": "使用缓存",
+        "using_cache_rate_limited": "使用缓存",
+        "optional_failed": "可选源不可用",
+    }.get(status, str(row.get("freshness_label") or status))
+    stale = bool(row.get("stale")) and status not in {"not_configured", "token_missing", "key_missing", "disabled"}
+    next_actions = ["去设置页配置"] if status in {"not_configured", "token_missing", "key_missing"} else ["查看运行期诊断"]
+    return {
+        "source_name": label,
+        "source_key": provider_id,
+        "provider_id": provider_id,
+        "enabled": bool(row.get("enabled")),
+        "configured": bool(row.get("configured")),
+        "attempted": bool(row.get("last_attempt_time")),
+        "status": status,
+        "success": success,
+        "from_cache": from_cache,
+        "message_zh": str(row.get("message_zh") or ""),
+        "last_update": str(row.get("last_success_time") or row.get("last_attempt_time") or ""),
+        "stale": stale,
+        "status_code": status,
+        "status_zh": status,
+        "freshness_label": freshness,
+        "last_success_time": str(row.get("last_success_time") or ""),
+        "last_attempt_time": str(row.get("last_attempt_time") or ""),
+        "ttl_seconds": None,
+        "ttl_zh": "按数据源更新",
+        "next_expected_update": "",
+        "next_expected_update_time": "",
+        "row_count": int(row.get("row_count") or 0),
+        "error_code": "" if success or from_cache else status,
+        "error_message_zh": "" if success or from_cache else str(row.get("message_zh") or ""),
+        "next_actions_zh": next_actions,
+        "suggested_action_zh": "；".join(next_actions),
+        "provider_status_source": "provider_status_canonical.json",
+        "source_file": str(row.get("source_file") or ""),
+        "status_time": str(row.get("status_time") or row.get("last_attempt_time") or ""),
+        "data_time": str(row.get("data_time") or row.get("last_success_time") or ""),
+        "report_time": str(row.get("report_time") or ""),
+    }
+
+
+def build_terminal_data_status() -> dict[str, Any]:  # type: ignore[override]
+    previous = _CANONICAL_PREVIOUS_BUILD_TERMINAL_DATA_STATUS()
+    try:
+        from .provider_status_canonical_service import build_canonical_provider_status
+
+        canonical = build_canonical_provider_status()
+    except Exception:
+        return previous
+    provider_list = canonical.get("provider_list") if isinstance(canonical, Mapping) else []
+    sources = [_canonical_source_row(row) for row in provider_list if isinstance(row, Mapping)]
+    payload = dict(previous) if isinstance(previous, Mapping) else {}
+    payload["sources"] = sanitize_for_json(sources)
+    payload["provider_status_canonical"] = canonical
+    payload["provider_status_source"] = "provider_status_canonical.json"
+    payload["report_time"] = canonical.get("generated_at") if isinstance(canonical, Mapping) else _now()
+    return sanitize_for_json(payload)
+
+
+def build_terminal_summary() -> dict[str, Any]:  # type: ignore[override]
+    """Connection-time summary; avoid slow provider and model checks."""
+    paths = _p31_market_paths()
+    watermark = _p31_read_json(paths["watermark"]) if paths["watermark"].exists() else {}
+    snapshot = _p31_read_json(paths["snapshot"]) if paths["snapshot"].exists() else {}
+    has_real_data = any(paths[name].exists() for name in ("watermark", "snapshot", "history", "last_good"))
+
+    if not has_real_data and not _refresh_has_run():
+        return sanitize_for_json(
+            {
+                "sample": True,
+                "sample_mode": True,
+                "sample_banner_zh": "当前为样例数据模式，请点击一键刷新数据获取真实数据。",
+                "system_status": "样例数据模式",
+                "data_quality_score": 0.0,
+                "data_quality_label": "样例数据",
+                "data_quality_components": {},
+                "data_quality_blocking_reasons": ["当前为样例数据模式。"],
+                "data_quality_degradation_reasons": ["请点击一键刷新数据。"],
+                "data_quality_next_actions_zh": ["刷新市场数据"],
+                "main_contract": "SN_SAMPLE",
+                "latest_price": None,
+                "price_change": None,
+                "price_change_pct": None,
+                "current_signal": "观望",
+                "model_status": "无 active",
+                "backtest_status": "研究观察",
+                "risk_level": "数据不足",
+                "last_update_time": _now(),
+                "customer_prediction_generated": False,
+                "active_updated": False,
+                "baseline_used": False,
+                "fake_prediction_generated": False,
+                "disclaimer": DISCLAIMER,
+            }
+        )
+
+    latest_price = None
+    quote_time = ""
+    active_contract = "SN"
+    from_cache = False
+    if isinstance(watermark, Mapping):
+        latest_price = watermark.get("latest_price")
+        quote_time = str(watermark.get("quote_time") or watermark.get("generated_at") or "")
+        active_contract = str(watermark.get("active_contract") or watermark.get("target_contract") or active_contract)
+        from_cache = bool(watermark.get("from_cache"))
+    if latest_price is None and isinstance(snapshot, Mapping):
+        latest_price = snapshot.get("latest_price") or snapshot.get("close")
+        quote_time = quote_time or str(snapshot.get("quote_time") or snapshot.get("generated_at") or "")
+        active_contract = str(snapshot.get("active_contract") or snapshot.get("contract") or active_contract)
+
+    has_price = latest_price is not None
+    quality = 0.72 if has_price and from_cache else 0.82 if has_price else 0.35
+    return sanitize_for_json(
+        {
+            "system_status": "缓存可用" if from_cache else "正常" if has_price else "数据不足",
+            "data_quality_score": quality,
+            "data_quality_label": "缓存可用" if from_cache else "较可靠" if has_price else "数据质量不足",
+            "data_quality_components": {},
+            "data_quality_blocking_reasons": [] if has_price else ["暂无最新行情价格。"],
+            "data_quality_degradation_reasons": ["当前使用缓存。"] if from_cache else [],
+            "data_quality_next_actions_zh": ["如需更新，请刷新市场数据。"] if from_cache else [],
+            "main_contract": active_contract,
+            "latest_price": _as_float(latest_price),
+            "price_change": None,
+            "price_change_pct": None,
+            "current_signal": "观望",
+            "model_status": "无 active",
+            "backtest_status": "研究观察",
+            "risk_level": "中" if has_price else "高",
+            "last_update_time": quote_time or _now(),
+            "customer_prediction_generated": False,
+            "active_updated": False,
+            "baseline_used": False,
+            "fake_prediction_generated": False,
+            "disclaimer": DISCLAIMER,
+        }
+    )
 
 # Prompt 32 override: normalize news/policy provider statuses so optional or
 # cached sources are not mislabeled as expired.
@@ -1872,3 +2112,92 @@ def build_terminal_data_status() -> dict[str, Any]:  # type: ignore[override]
         "blocked_by_waf 不等于主行情失败。"
     )
     return sanitize_for_json(previous)
+
+
+# Performance override: keep connection-time APIs lightweight. Heavy research,
+# backtest, refresh and validation payloads are available through their own
+# pages or task APIs and should not block the terminal shell.
+def build_terminal_system_health() -> dict[str, Any]:  # type: ignore[override]
+    env = load_environment_config()
+    storage_status = "可写" if Path(env.data_dir).exists() else "数据目录待创建"
+    health = SystemHealth(
+        api_status="正常",
+        data_status="待验证",
+        model_status="待验证",
+        storage_status=storage_status,
+        report_status="正常",
+        frontend_status="React 终端可用",
+        warnings=["lightweight system-health 未调用慢 provider；深度诊断请使用 runtime-diagnostics。"],
+        last_check_time=_now(),
+    )
+    return sanitize_for_json(
+        {
+            "mode": "lightweight",
+            "generated_at": _now(),
+            "cache_age_seconds": 0.0,
+            "health": health,
+            "truth_audit": {"status": "skipped", "message_zh": "轻量健康检查不调用慢 provider。"},
+            "disclaimer": DISCLAIMER,
+        }
+    )
+
+
+def build_terminal_snapshot() -> dict[str, Any]:  # type: ignore[override]
+    from .refresh_service import get_refresh_status
+
+    summary = build_terminal_summary()
+    snapshot = {
+        "snapshot_mode": "lite",
+        "generated_at": _now(),
+        "cache_age_seconds": 0.0,
+        "summary": summary,
+        "refresh_status": get_refresh_status(),
+        "omitted_components": [
+            "predictions",
+            "model_health",
+            "learning_status",
+            "backtest_diagnostics",
+            "data_status",
+            "system_health",
+        ],
+        "message_zh": "轻量快照只服务首屏连接；重模块由各页面独立加载或通过任务 API 执行。",
+        "customer_prediction_generated": False,
+        "disclaimer": DISCLAIMER,
+    }
+    if isinstance(summary, Mapping) and summary.get("sample_mode"):
+        snapshot["sample"] = True
+        snapshot["sample_mode"] = True
+        snapshot["sample_banner_zh"] = summary.get("sample_banner_zh")
+    return sanitize_for_json(snapshot)
+
+
+_TERMINAL_DATA_STATUS_CANONICAL_EXPORT_PREVIOUS = build_terminal_data_status
+
+
+def build_terminal_data_status() -> dict[str, Any]:  # type: ignore[override]
+    previous = _TERMINAL_DATA_STATUS_CANONICAL_EXPORT_PREVIOUS()
+    try:
+        from .provider_status_canonical_service import build_canonical_provider_status
+
+        canonical = build_canonical_provider_status()
+    except Exception:
+        return sanitize_for_json(previous)
+
+    provider_list = canonical.get("provider_list") if isinstance(canonical, Mapping) else []
+    canonical_sources = [_canonical_source_row(row) for row in provider_list if isinstance(row, Mapping)]
+    canonical_ids = {str(row.get("provider_id") or "").strip().lower() for row in canonical_sources}
+    previous_sources = (
+        previous.get("sources", []) if isinstance(previous, Mapping) and isinstance(previous.get("sources"), list) else []
+    )
+    preserved_sources = [
+        dict(source)
+        for source in previous_sources
+        if isinstance(source, Mapping) and not _final_canonical_duplicate_source(source, canonical_ids)
+    ]
+    payload = dict(previous) if isinstance(previous, Mapping) else {}
+    payload["sources"] = sanitize_for_json(canonical_sources + preserved_sources)
+    payload["tushare_subinterfaces"] = _tushare_subinterfaces()
+    payload["provider_status_canonical"] = canonical
+    payload["provider_status_source"] = "provider_status_canonical.json"
+    payload["report_time"] = canonical.get("generated_at") if isinstance(canonical, Mapping) else _now()
+    return sanitize_for_json(payload)

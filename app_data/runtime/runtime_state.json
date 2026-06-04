@@ -1,0 +1,12 @@
+{
+  "build_id": "sn-terminal-v3.8.0",
+  "app_version": "V3.8.0",
+  "active_pid": 714748,
+  "api_port": 8765,
+  "frontend_port": 8765,
+  "data_dir": "C:\\Users\\Henry Austin\\Desktop\\SN_futures\\app_data",
+  "cache_dir": "C:\\Users\\Henry Austin\\Desktop\\SN_futures\\app_data\\cache",
+  "model_registry_path": "C:\\Users\\Henry Austin\\Desktop\\SN_futures\\app_data\\models\\sn-terminal-v3.8.0\\model_registry.json",
+  "started_at": 1780313705.2158449,
+  "message": "test"
+}

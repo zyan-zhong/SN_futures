@@ -1,6 +1,6 @@
 # SNInsightTerminal Release Guide
 
-Current private research release target: `0.3.8-private-research-beta.1`
+Current private research release target: `0.4.2-private-research-beta.2`
 
 This guide covers the Windows private installer build, installed smoke validation, private provider key handling, and release governance. The terminal is a research system. It does not connect to live trading, does not promise returns, and does not generate customer predictions unless a model has passed promotion gate and been explicitly approved as active.
 
@@ -48,11 +48,14 @@ Build the private install-ready package:
   -PrivateBundleKeys `
   -PrivateKeysFile "packaging/private_release_keys.json" `
   -AllowEmbeddedProviderKeys `
+  -RequireAllPrivateProviderKeys `
   -NodePath "C:\Program Files\nodejs\node.exe" `
   -NpmPath "C:\Program Files\nodejs\npm.cmd"
 ```
 
-The build creates `build/private_bundle_seed.json` only long enough for PyInstaller to embed it in the private bundle, then removes the plaintext build-time seed file. The frontend bundle and release root must not contain the seed.
+The build always reads `packaging/private_release_keys.json` when `-PrivateBundleKeys` is enabled, then merges those values with environment variables. `-RequireAllPrivateProviderKeys` makes Alpha Vantage, NewsAPI, and Tushare mandatory before packaging; Managed Proxy is embedded only when configured.
+
+The build creates `build/private_bundle_seed.json` only long enough for PyInstaller to embed it in the private bundle, then removes the plaintext build-time seed file. The frontend bundle and release root must not contain the seed. Build logs may show only configured/masked provider status.
 
 ## Installed Smoke
 
@@ -67,6 +70,7 @@ The smoke validates:
 - installer success
 - first launch and API availability
 - private key import or existing user key detection
+- Tushare configured/masked when private bundle keys are expected
 - masked settings/key diagnostics
 - `/terminal` and `/legacy`
 - Playwright browser smoke when frontend dependencies exist

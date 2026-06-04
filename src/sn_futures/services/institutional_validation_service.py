@@ -12,6 +12,7 @@ import numpy as np
 
 from ..api.json_utils import sanitize_for_json
 from ..runtime import get_user_output_dir
+from .feature_stability_evidence_service import build_feature_stability_evidence
 from .feature_stability_service import build_feature_stability_report
 from .model_research_service import get_model_experiment_detail, list_model_experiments
 
@@ -69,6 +70,55 @@ def _read_json(path: Path) -> Any:
         return json.loads(path.read_text(encoding="utf-8"))
     except Exception:
         return None
+
+
+def _merge_feature_stability_evidence(payload: Mapping[str, Any], candidate_version: str) -> dict[str, Any]:
+    out = dict(payload)
+    try:
+        evidence = build_feature_stability_evidence(candidate_version=candidate_version)
+    except Exception:
+        return out
+    if evidence.get("evidence_status") != "success":
+        return out
+
+    stability = out.get("feature_stability")
+    stability_payload = dict(stability) if isinstance(stability, Mapping) else {}
+    stability_payload.update(
+        {
+            "stability_score": evidence.get("stability_score"),
+            "threshold": evidence.get("threshold"),
+            "passed": evidence.get("passed"),
+            "stable_features": evidence.get("stable_features", []),
+            "unstable_features": evidence.get("unstable_features", []),
+            "feature_stability": evidence.get("feature_details", []),
+            "unstable_feature_blacklist": evidence.get("unstable_features", []),
+            "evidence_mode": evidence.get("evidence_mode"),
+            "evidence_report_path": evidence.get("report_path"),
+            "permutation_importance_status": evidence.get("permutation_importance_status"),
+            "recommendations": evidence.get("recommendations", []),
+        }
+    )
+    out["feature_stability"] = stability_payload
+
+    eligibility = out.get("promotion_eligibility")
+    if isinstance(eligibility, Mapping):
+        eligibility_out = dict(eligibility)
+        checks = []
+        for item in eligibility_out.get("checks") or []:
+            if isinstance(item, Mapping) and str(item.get("name") or "").strip().lower() == "feature stability":
+                check = dict(item)
+                check["passed"] = bool(evidence.get("passed"))
+                check["value"] = evidence.get("stability_score")
+                check["threshold"] = f">= {evidence.get('threshold')}"
+                check["failure_reason_zh"] = "" if evidence.get("passed") else "特征重要性稳定性不足"
+                checks.append(check)
+            elif isinstance(item, Mapping):
+                checks.append(dict(item))
+        if checks:
+            eligibility_out["checks"] = checks
+            eligibility_out["failure_reasons"] = [str(item.get("failure_reason_zh")) for item in checks if isinstance(item, Mapping) and not item.get("passed") and item.get("failure_reason_zh")]
+        out["promotion_eligibility"] = eligibility_out
+    return sanitize_for_json(out)
 
 
 def _safe_float(value: Any, default: float = 0.0) -> float:
@@ -404,11 +454,34 @@ def run_institutional_validation(
     regime_stress = _regime_stress(folds)
     dominance = _dominance_checks(folds, regime_stress, cfg)
 
-    fold_importance = [{"feature_importance": fold["feature_importance"]} for fold in folds if isinstance(fold.get("feature_importance"), Mapping)]
+    fold_importance = [{"feature_importance": fold["feature_importance"]} for fold in folds if isinstance(fold.get("feature_importance"), (Mapping, list))]
     stability = build_feature_stability_report(fold_importance)
     stability_rows = stability.get("feature_stability") or []
     stable_count = sum(1 for row in stability_rows if isinstance(row, Mapping) and row.get("stable"))
     stability_rate = stable_count / max(1, len(stability_rows))
+    if candidate_version != "v1":
+        try:
+            evidence = build_feature_stability_evidence(candidate_version=candidate_version)
+        except Exception:
+            evidence = {}
+        if isinstance(evidence, Mapping) and evidence.get("evidence_status") == "success":
+            stability = dict(stability)
+            stability.update(
+                {
+                    "stability_score": evidence.get("stability_score"),
+                    "threshold": evidence.get("threshold"),
+                    "passed": evidence.get("passed"),
+                    "stable_features": evidence.get("stable_features", []),
+                    "unstable_features": evidence.get("unstable_features", []),
+                    "feature_stability": evidence.get("feature_details", []),
+                    "unstable_feature_blacklist": evidence.get("unstable_features", []),
+                    "evidence_mode": evidence.get("evidence_mode"),
+                    "evidence_report_path": evidence.get("report_path"),
+                    "permutation_importance_status": evidence.get("permutation_importance_status"),
+                    "recommendations": evidence.get("recommendations", []),
+                }
+            )
+            stability_rate = _safe_float(evidence.get("stability_score"), stability_rate)
     high_conf_samples = sum(_top20_sample_count(fold) for fold in folds)
 
     checks = [
@@ -518,7 +591,11 @@ def get_institutional_validation_report(candidate_version: str = "v1") -> dict[s
     payload = _read_json(_report_path(candidate_version))
     if not isinstance(payload, Mapping):
         return sanitize_for_json({"status": "not_run", "passed": False, "message_zh": "机构级验证尚未运行。", "active_updated": False})
-    return sanitize_for_json(payload)
+    version = _normalise_version(candidate_version)
+    enriched = _merge_feature_stability_evidence(payload, version) if version != "v1" else dict(payload)
+    if enriched != payload:
+        _write_json(_report_path(version), enriched)
+    return sanitize_for_json(enriched)
 
 
 def get_institutional_stress_tests(candidate_version: str = "v1") -> dict[str, Any]:

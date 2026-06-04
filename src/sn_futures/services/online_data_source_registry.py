@@ -96,10 +96,15 @@ def build_online_data_source_registry() -> dict[str, Any]:
     shfe_results = shfe_status.get("results") if isinstance(shfe_status, Mapping) and isinstance(shfe_status.get("results"), Mapping) else {}
     fx_status = _status_from_file(fundamentals / "fx_macro_provider_status.json")
     lme_status = _status_from_file(fundamentals / "lme_tin_provider_status.json", default_status="paid_or_unavailable")
-    managed_enabled = os.getenv("SN_MANAGED_DATA_PROXY_ENABLED", "").strip().lower() in {"1", "true", "yes", "on"}
+    tushare_status = _status_from_file(fundamentals / "tushare_provider_status.json", default_status="token_missing")
+    from .managed_data_proxy_service import managed_proxy_status
+
+    managed_status = managed_proxy_status()
+    managed_enabled = bool(managed_status.get("enabled"))
     alpha_key = resolve_secret("SN_ALPHA_VANTAGE_KEY")
     news_key = resolve_secret("SN_NEWSAPI_KEY")
     managed_token = str(resolve_secret("SN_MANAGED_DATA_PROXY_TOKEN").get("value") or "")
+    tushare_token = resolve_secret("SN_TUSHARE_TOKEN")
 
     def result_status(key: str, fallback: str) -> tuple[str, str]:
         item = shfe_results.get(key) if isinstance(shfe_results, Mapping) else None
@@ -201,7 +206,7 @@ def build_online_data_source_registry() -> dict[str, Any]:
             requires_paid_account=False,
             priority=2,
             ttl_seconds=24 * 3600,
-            legal_note="NewsAPI 只用于事件新闻；key 通过 X-Api-Key header 发送，不拼 URL。",
+            legal_note="NewsAPI 只用于事件新闻；key 通过安全请求头发送，不拼 URL。",
             fields_provided=["title", "description", "published_at", "relevance_score", "used_in_model"],
             status="configured" if news_key.get("configured") else "key_missing",
             last_success_time="",
@@ -233,9 +238,29 @@ def build_online_data_source_registry() -> dict[str, Any]:
             ttl_seconds=24 * 3600,
             legal_note="正式客户免配置推荐方案；第三方 API key 由发行方服务器维护，不能写入公开安装包。",
             fields_provided=["spot_price", "basis", "inventory", "warehouse_receipt", "lme_tin_close"],
-            status="disabled" if not managed_enabled else "token_missing" if not managed_token else "unavailable",
-            last_success_time="",
+            status=str(managed_status.get("status") or ("token_missing" if not managed_token else "unavailable")),
+            last_success_time=str(managed_status.get("last_success_time") or ""),
             next_actions_zh=["默认关闭；如发行方提供托管服务，在设置页启用并配置 license token。"],
+            row_count=int(managed_status.get("row_count") or 0),
+            from_cache=bool(managed_status.get("from_cache") or False),
+        ),
+        _entry(
+            source_id="tushare_futures_fundamentals",
+            category="term_structure",
+            provider="tushare",
+            enabled=True,
+            requires_key=True,
+            requires_paid_account=False,
+            priority=2,
+            ttl_seconds=36 * 3600,
+            legal_note="Tushare Pro 用于期货基础数据：合约信息、日线、仓单、结算参数、持仓排名、交易日历；不用于实盘交易。",
+            fields_provided=["contract", "settlement", "open_interest", "warehouse_receipt", "member_position", "trade_calendar"],
+            status=str(tushare_status.get("status") or "token_missing") if tushare_token.get("configured") else "token_missing",
+            last_success_time=str(tushare_status.get("last_success_time") or ""),
+            last_attempt_time=str(tushare_status.get("last_attempt_time") or ""),
+            row_count=int(tushare_status.get("row_count") or 0),
+            from_cache=bool(tushare_status.get("from_cache")),
+            next_actions_zh=["在设置页配置 Tushare token。"] if not tushare_token.get("configured") else ["刷新 Tushare 期货基础数据。"],
         ),
     ]
     return sanitize_for_json(

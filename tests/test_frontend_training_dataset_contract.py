@@ -30,6 +30,16 @@ class FrontendTrainingDatasetContractTest(unittest.TestCase):
         self.assertNotIn("baseline forecast", panel)
         self.assertNotIn("baseline backtest", panel)
 
+    def test_training_data_page_exposes_v10_regime_balance_status(self) -> None:
+        page = (FRONTEND / "pages" / "TrainingDataPage.tsx").read_text(encoding="utf-8")
+        types = (FRONTEND / "api" / "types.ts").read_text(encoding="utf-8")
+
+        self.assertIn('"v10"', page)
+        self.assertIn("regime_balanced_tushare_cost_positioning", page)
+        self.assertIn("v10 regime balance", page)
+        self.assertIn("horizon_regime_counts", types)
+        self.assertIn("regime_sample_weights", types)
+
 
 if __name__ == "__main__":
     unittest.main()

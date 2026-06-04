@@ -2,13 +2,21 @@ import type { DataSourceStatus } from "../../api/types";
 import { formatDateTime, formatNullable } from "../../utils/format";
 import { DataTable } from "../common/DataTable";
 import { EmptyState } from "../common/EmptyState";
+import { CompactProviderCard } from "../common/CompactProviderCard";
+import { CompactReasonList } from "../common/CompactReasonList";
 import { MetricCard } from "../common/MetricCard";
 import { StatusPill } from "../common/StatusPill";
 import { SectionCard } from "../layout/SectionCard";
 
 type StatusTone = "good" | "warn" | "bad" | "neutral" | "info";
 
+function optionalFailureTone(status: string): StatusTone | null {
+  if (status === "optional_failed") return "warn";
+  return null;
+}
+
 function sourceStatusLabel(source: DataSourceStatus): string {
+  if (source.status_code === "optional_failed") return "可选源失败，不影响主行情";
   if (source.freshness_label) return source.freshness_label;
   if (source.status_zh) return source.status_zh;
   if (!source.enabled && source.configured === false) return "未配置";
@@ -21,6 +29,8 @@ function sourceStatusLabel(source: DataSourceStatus): string {
 }
 
 function statusTone(status: string): StatusTone {
+  const optionalTone = optionalFailureTone(status);
+  if (optionalTone || status === "可选源失败，不影响主行情") return optionalTone || "warn";
   if (
     status === "blocked_by_waf" ||
     status === "函数不可用" ||
@@ -46,6 +56,13 @@ function nextActionsText(source: DataSourceStatus): string {
   const actions = source.next_actions_zh;
   if (Array.isArray(actions) && actions.length) return actions.join("；");
   return source.suggested_action_zh || "查看运行期诊断";
+}
+
+function sanitizeVisiblePath(value?: string): string {
+  // mini_racer.dll errors can include local user paths; show the file name, not the private path.
+  return String(value || "")
+    .replace(/[A-Z]:\\Users\\[^\\]+/gi, "%USERPROFILE%")
+    .replace(/[A-Z]:\\[^\s]+/gi, "[local-path]");
 }
 
 export function DataSourceStatusPanel({
@@ -84,9 +101,13 @@ export function DataSourceStatusPanel({
       stale_label: source.stale ? "已过期" : "未过期",
       last_success_time: source.last_success_time || source.last_update,
       last_attempt_time: source.last_attempt_time || source.last_update,
+      status_time: source.status_time || source.last_attempt_time || source.last_update,
+      data_time: source.data_time || source.last_success_time || source.last_update,
+      report_time: source.report_time || "",
+      source_file: sanitizeVisiblePath(source.source_file || source.provider_status_source || "provider_status_canonical.json"),
       ttl_zh: source.ttl_zh || (source.ttl_seconds ? `${Math.round(source.ttl_seconds / 60)} 分钟` : "本周期未更新"),
       next_expected_update: source.next_expected_update || source.next_expected_update_time,
-      error_message_zh: source.error_message_zh || source.message_zh || "",
+      error_message_zh: sanitizeVisiblePath(source.error_message_zh || source.message_zh || ""),
       next_actions_text: nextActionsText(source),
       row_count: source.row_count ?? 0
     };
@@ -98,6 +119,11 @@ export function DataSourceStatusPanel({
   const failed = countBy(rows, (source) => sourceStatusLabel(source) === "请求失败");
   const cached = countBy(rows, (source) => sourceStatusLabel(source) === "使用缓存");
   const stale = countBy(rows, (source) => sourceStatusLabel(source) === "已过期");
+
+  const copyLogsDir = () => {
+    if (!logsDir) return;
+    void navigator.clipboard?.writeText(logsDir);
+  };
 
   return (
     <div className="page-stack">
@@ -120,7 +146,7 @@ export function DataSourceStatusPanel({
           <button className="ghost-button" type="button" onClick={onRefresh}>
             刷新状态
           </button>
-          <button className="ghost-button" type="button" title={logsDir || "日志目录暂缺"}>
+          <button className="ghost-button" type="button" onClick={copyLogsDir} title={logsDir || "日志目录暂缺"}>
             查看日志位置
           </button>
         </div>
@@ -130,6 +156,21 @@ export function DataSourceStatusPanel({
         title="数据源列表"
         subtitle="显示最近成功时间、最近尝试时间、TTL、下一次建议刷新、返回条数、错误原因和下一步建议。"
       >
+        <div className="provider-card-grid">
+          {rows.slice(0, 6).map((source) => (
+            <CompactProviderCard
+              key={source.provider_id || source.source_name || source.source_file}
+              lastAttemptTime={source.last_attempt_time}
+              lastSuccessTime={source.last_success_time}
+              name={formatNullable(source.source_name || source.provider_id, "鏁版嵁婧?")}
+              nextAction={source.next_actions_text}
+              reason={source.error_message_zh}
+              rowCount={source.row_count}
+              status={source.status}
+              tone={source.status_tone as "good" | "warn" | "bad" | "neutral" | "info"}
+            />
+          ))}
+        </div>
         <DataTable
           data={rows as Array<Record<string, unknown>>}
           columns={[
@@ -145,6 +186,10 @@ export function DataSourceStatusPanel({
             { key: "row_count", title: "返回条数" },
             { key: "last_success_time", title: "最近成功", render: (row) => formatDateTime(row.last_success_time) },
             { key: "last_attempt_time", title: "最近尝试", render: (row) => formatDateTime(row.last_attempt_time) },
+            { key: "status_time", title: "状态来源时间", render: (row) => formatDateTime(row.status_time) },
+            { key: "data_time", title: "数据时间", render: (row) => formatDateTime(row.data_time) },
+            { key: "report_time", title: "报告时间", render: (row) => formatDateTime(row.report_time) },
+            { key: "source_file", title: "状态来源", render: (row) => formatNullable(row.source_file, "provider_status_canonical.json") },
             { key: "ttl_zh", title: "TTL" },
             { key: "next_expected_update", title: "下次建议刷新", render: (row) => formatDateTime(row.next_expected_update) },
             { key: "error_message_zh", title: "原因说明", render: (row) => formatNullable(row.error_message_zh, "暂无错误") },
@@ -157,6 +202,14 @@ export function DataSourceStatusPanel({
         title="状态解释"
         subtitle="系统健康颜色与行情涨跌颜色分离：系统正常使用蓝/青，行情上涨红色、下跌绿色。"
       >
+        <CompactReasonList
+          items={[
+            { label: "姝ｅ父", reason: "鏁版嵁婧愬彲鐢?", next: "缁х画瑙傚療" },
+            { label: "浣跨敤缂撳瓨", reason: "褰撳墠灞曠ず鏈€杩戞垚鍔熸暟鎹?", next: "绛夊緟涓嬫鍒锋柊" },
+            { label: "鏈厤缃?", reason: "缂哄皯 key 鎴栫鐐?", next: "鍓嶅線璁剧疆" },
+            { label: "璇锋眰澶辫触", reason: "鎺ュ彛鎴栫綉缁滀笉鍙敤", next: "鏌ョ湅璇婃柇" }
+          ]}
+        />
         <div className="reason-list">
           <StatusPill label="正常：数据源可用" tone="good" />
           <StatusPill label="使用缓存：展示最近成功数据" tone="warn" />

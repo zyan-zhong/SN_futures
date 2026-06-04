@@ -81,7 +81,7 @@ def main(argv: list[str] | None = None) -> int:
     docs_url = f"http://{host}:{port}/api/terminal/docs"
     health_url = f"http://{host}:{port}/api/terminal/system-health"
     target_path = "/legacy" if args.legacy else "/terminal"
-    target_url = f"http://{host}:{port}{target_path}"
+    target_url = f"http://{host}:{port}{target_path}?desktop=1"
 
     # The docs endpoint is the hard readiness gate. System-health can be slower on
     # packaged cold starts, so a delayed health response must not terminate the app.

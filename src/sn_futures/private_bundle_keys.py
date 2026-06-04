@@ -108,7 +108,7 @@ def import_private_bundle_keys_if_needed() -> dict[str, Any]:
     skipped_existing: list[str] = []
     now = datetime.now().isoformat(timespec="seconds")
 
-    for name in ("SN_ALPHA_VANTAGE_KEY", "SN_NEWSAPI_KEY"):
+    for name in SECRET_KEYS:
         existing = str(payload.get(name, "") or "").strip()
         if existing:
             skipped_existing.append(name)

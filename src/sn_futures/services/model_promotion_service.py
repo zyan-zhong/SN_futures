@@ -180,7 +180,8 @@ def evaluate_promotion_gate(config: StrictPromotionConfig | None = None, *, cand
     cfg = config or StrictPromotionConfig()
     candidate_version = _normalise_version(candidate_version)
     candidate_status = get_candidate_training_status(candidate_version=candidate_version)
-    manifest = get_training_dataset_status(dataset_version=candidate_version)
+    dataset_version = str(candidate_status.get("dataset_version") or candidate_version)
+    manifest = get_training_dataset_status(dataset_version=dataset_version)
     registry = ModelRegistry(_candidate_registry_path(candidate_version))
     records = [record.to_dict() for record in registry.list_candidates()]
     if not records:
@@ -195,6 +196,7 @@ def evaluate_promotion_gate(config: StrictPromotionConfig | None = None, *, cand
         "passed": bool(passed),
         "message_zh": "存在 candidate 通过 promotion gate。" if passed else "没有 candidate 通过 promotion gate，active 保持不变。",
         "config": asdict(cfg),
+        "dataset_version": dataset_version,
         "decisions": decisions,
         "passed_candidates": passed,
         "active_updated": False,

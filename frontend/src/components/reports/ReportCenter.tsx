@@ -40,6 +40,7 @@ export function ReportCenter({ reports, onReportSelect }: { reports?: ReportItem
   if (!reports?.length) return <EmptyState label="暂无报告，请先运行报告生成任务。" />;
   const active = selected || reports[0];
   const markdown = cleanMarkdown(active);
+  const previewLines = markdown.split(/\r?\n/).filter(Boolean).slice(0, 18);
 
   async function copyMarkdown() {
     await navigator.clipboard?.writeText(markdown);
@@ -102,9 +103,13 @@ export function ReportCenter({ reports, onReportSelect }: { reports?: ReportItem
           <StatusPill label={`模型版本：${formatNullable(active.model_version)}`} tone="info" />
           <StatusPill label={`数据质量：${formatPercent(active.data_quality_score)}`} tone="info" />
         </div>
-        <details className="report-preview" open>
+        <details className="report-preview">
           <summary>展开/折叠报告内容</summary>
-          <pre>{markdown}</pre>
+          <div className="report-preview-body">
+            {previewLines.map((line, index) => (
+              <p key={`${index}-${line.slice(0, 16)}`}>{line}</p>
+            ))}
+          </div>
         </details>
         <div className="button-row">
           <button className="ghost-button" type="button" onClick={() => void copyMarkdown()}>

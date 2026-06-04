@@ -1,0 +1,7 @@
+{
+  "SN_MANAGED_PROXY_ENABLED": false,
+  "SN_MANAGED_PROXY_BASE_URL": "https://managed-proxy.example",
+  "SN_MANAGED_PROXY_TOKEN": "your_managed_proxy_token_here",
+  "SN_MANAGED_PROXY_TIMEOUT_SECONDS": 20,
+  "note": "Copy to config/managed_proxy.local.json for local use. Do not commit real endpoint or token values."
+}

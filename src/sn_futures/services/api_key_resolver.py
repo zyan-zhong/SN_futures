@@ -8,7 +8,7 @@ from typing import Any
 from ..user_data import initialize_user_data_dir, secrets_path
 
 
-SECRET_KEYS = ("SN_ALPHA_VANTAGE_KEY", "SN_NEWSAPI_KEY", "SN_MANAGED_DATA_PROXY_TOKEN")
+SECRET_KEYS = ("SN_ALPHA_VANTAGE_KEY", "SN_NEWSAPI_KEY", "SN_MANAGED_DATA_PROXY_TOKEN", "SN_TUSHARE_TOKEN")
 PLACEHOLDER_VALUES = {
     "***",
     "****",
@@ -16,11 +16,19 @@ PLACEHOLDER_VALUES = {
     "[masked]",
     "your_alpha_vantage_api_key_here",
     "your_newsapi_key_here",
+    "your_tushare_token_here",
+    "<本机真实 Tushare token>",
+    "<本机真实 tushare token>",
+    "<your_tushare_token>",
 }
 
 
 def _project_root() -> Path:
     return Path(__file__).resolve().parents[3]
+
+
+def _has_explicit_data_dir() -> bool:
+    return bool(str(os.environ.get("SN_DATA_DIR") or "").strip())
 
 
 def mask_key(value: str | None) -> str:
@@ -36,17 +44,35 @@ def _read_json(path: Path) -> dict[str, Any]:
     if not path.exists():
         return {}
     try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
+        payload = json.loads(path.read_text(encoding="utf-8-sig"))
     except Exception:
         return {}
     return payload if isinstance(payload, dict) else {}
 
 
+def _is_placeholder_secret(value: Any) -> bool:
+    text = str(value or "").strip()
+    if not text:
+        return True
+    lower = text.lower()
+    if lower in {item.lower() for item in PLACEHOLDER_VALUES}:
+        return True
+    if set(text) <= {"*"}:
+        return True
+    if lower in {"configured", "not_configured", "source", "masked", "redacted"}:
+        return True
+    return False
+
+
+def _clean_secret_value(value: Any) -> str:
+    text = str(value or "").strip()
+    return "" if _is_placeholder_secret(text) else text
+
+
 def read_user_secrets() -> dict[str, str]:
     initialize_user_data_dir()
     raw = _read_json(secrets_path())
-    values = {key: str(raw.get(key, "") or "").strip() for key in SECRET_KEYS}
-    return {key: ("" if value in PLACEHOLDER_VALUES else value) for key, value in values.items()}
+    return {key: _clean_secret_value(raw.get(key, "")) for key in SECRET_KEYS}
 
 
 def read_user_secret_records() -> dict[str, dict[str, str]]:
@@ -55,9 +81,7 @@ def read_user_secret_records() -> dict[str, dict[str, str]]:
     sources = raw.get("_sources") if isinstance(raw.get("_sources"), dict) else {}
     records: dict[str, dict[str, str]] = {}
     for key in SECRET_KEYS:
-        value = str(raw.get(key, "") or "").strip()
-        if value in PLACEHOLDER_VALUES:
-            value = ""
+        value = _clean_secret_value(raw.get(key, ""))
         if not value:
             continue
         source = str(sources.get(key) or "user_secrets")
@@ -65,23 +89,43 @@ def read_user_secret_records() -> dict[str, dict[str, str]]:
     return records
 
 
-def read_private_bundle_secrets() -> dict[str, str]:
-    candidates = []
+def _private_secret_candidates() -> list[tuple[Path, str]]:
+    candidates: list[tuple[Path, str]] = []
+    if os.environ.get("SN_PRIVATE_RELEASE_KEYS"):
+        candidates.append((Path(os.environ["SN_PRIVATE_RELEASE_KEYS"]).expanduser(), "private_release_keys"))
     if os.environ.get("SN_PRIVATE_BUNDLE_SECRETS"):
-        candidates.append(Path(os.environ["SN_PRIVATE_BUNDLE_SECRETS"]).expanduser())
+        candidates.append((Path(os.environ["SN_PRIVATE_BUNDLE_SECRETS"]).expanduser(), "private_bundle"))
     root = _project_root()
-    candidates.extend(
-        [
-            root / "private_bundle" / "secrets.json",
-            root / "private_bundle" / "secrets.seed.json",
-            root / "packaging" / "private_bundle" / "secrets.json",
-        ]
-    )
-    for path in candidates:
+    if not _has_explicit_data_dir():
+        candidates.extend(
+            [
+                (root / "packaging" / "private_release_keys.json", "private_release_keys"),
+                (root / "private_bundle" / "secrets.json", "private_bundle"),
+                (root / "private_bundle" / "secrets.seed.json", "private_bundle"),
+                (root / "packaging" / "private_bundle" / "secrets.json", "private_bundle"),
+            ]
+        )
+    return candidates
+
+
+def read_private_secret_records() -> dict[str, dict[str, str]]:
+    project_private_keys = _project_root() / "packaging" / "private_release_keys.json"
+    for path, source in _private_secret_candidates():
         raw = _read_json(path)
-        if raw:
-            return {key: str(raw.get(key, "") or "").strip() for key in SECRET_KEYS}
+        if not raw:
+            continue
+        secrets = raw.get("secrets") if isinstance(raw.get("secrets"), dict) else raw
+        allowed_keys = ("SN_TUSHARE_TOKEN",) if source == "private_release_keys" and path == project_private_keys else SECRET_KEYS
+        values = {key: _clean_secret_value(secrets.get(key, "")) for key in allowed_keys}
+        records = {key: {"value": value, "source": source} for key, value in values.items() if value}
+        if records:
+            return records
     return {}
+
+
+def read_private_bundle_secrets() -> dict[str, str]:
+    records = read_private_secret_records()
+    return {key: record["value"] for key, record in records.items()}
 
 
 def read_project_env_values() -> dict[str, str]:
@@ -101,7 +145,7 @@ def read_project_env_values() -> dict[str, str]:
         key = key.strip()
         if key not in SECRET_KEYS:
             continue
-        value = value.strip().strip("\"'")
+        value = _clean_secret_value(value.strip().strip("\"'"))
         values[key] = value
     return values
 
@@ -123,13 +167,20 @@ def resolve_secret(name: str) -> dict[str, Any]:
         source = str(user_record.get("source") or "user_secrets")
         return {"name": name, "configured": True, "source": source, "value": user_value, "masked": mask_key(user_value)}
 
-    env_value = str(os.environ.get(name, "") or "").strip()
+    private_record = read_private_secret_records().get(name, {})
+    private_value = str(private_record.get("value") or "")
+    if private_value:
+        source = str(private_record.get("source") or "private_bundle")
+        return {"name": name, "configured": True, "source": source, "value": private_value, "masked": mask_key(private_value)}
+
+    env_value = _clean_secret_value(os.environ.get(name, ""))
     if env_value:
         return {"name": name, "configured": True, "source": "env", "value": env_value, "masked": mask_key(env_value)}
 
-    env_file_value = read_project_env_values().get(name, "")
-    if env_file_value:
-        return {"name": name, "configured": True, "source": ".env", "value": env_file_value, "masked": mask_key(env_file_value)}
+    if not _has_explicit_data_dir():
+        env_file_value = read_project_env_values().get(name, "")
+        if env_file_value:
+            return {"name": name, "configured": True, "source": ".env", "value": env_file_value, "masked": mask_key(env_file_value)}
 
     return {"name": name, "configured": False, "source": "none", "value": "", "masked": ""}
 

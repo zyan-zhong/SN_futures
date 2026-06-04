@@ -68,6 +68,7 @@ def load_api_keys() -> dict[str, str]:
         return {
             "SN_ALPHA_VANTAGE_KEY": os.environ.get("SN_ALPHA_VANTAGE_KEY", ""),
             "SN_NEWSAPI_KEY": os.environ.get("SN_NEWSAPI_KEY", ""),
+            "SN_TUSHARE_TOKEN": os.environ.get("SN_TUSHARE_TOKEN", ""),
         }
     try:
         raw = json.loads(paths.api_keys_path.read_text(encoding="utf-8"))
@@ -75,7 +76,7 @@ def load_api_keys() -> dict[str, str]:
         raw = {}
 
     keys: dict[str, str] = {}
-    for name in ("SN_ALPHA_VANTAGE_KEY", "SN_NEWSAPI_KEY"):
+    for name in ("SN_ALPHA_VANTAGE_KEY", "SN_NEWSAPI_KEY", "SN_TUSHARE_TOKEN"):
         stored = str(raw.get(name, "") or "")
         decoded = decrypt_secret(stored) or stored
         keys[name] = os.environ.get(name, "") or decoded

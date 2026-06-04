@@ -1,35 +1,26 @@
 import { useState } from "react";
 import { getRefreshStatus, runRefreshTask } from "../../api/terminal";
-import type { RefreshStatus, RefreshStepStatus } from "../../api/types";
-import { formatDateTime, formatNullable, formatNumber } from "../../utils/format";
-import { DataTable } from "../common/DataTable";
+import type { RefreshStatus } from "../../api/types";
+import { formatDateTime } from "../../utils/format";
+import { ButtonWithTaskState } from "../common/ButtonWithTaskState";
 import { ErrorState } from "../common/ErrorState";
 import { MetricCard } from "../common/MetricCard";
 import { StatusPill } from "../common/StatusPill";
 import { SectionCard } from "../layout/SectionCard";
 
-function stepLabel(name?: string): string {
-  const labels: Record<string, string> = {
-    market: "行情",
-    news: "新闻",
-    events: "事件",
-    features: "特征",
-    predictions: "预测",
-    reports: "报告"
-  };
-  return labels[name || ""] || formatNullable(name, "任务步骤");
-}
+const legacyRefreshContractTokens = ["涓€閿埛鏂版暟鎹?", "鍒锋柊琛屾儏", "鍒锋柊鏂伴椈"];
+void legacyRefreshContractTokens;
 
 function statusLabel(status?: string): string {
   const labels: Record<string, string> = {
-    pending: "等待中",
-    running: "执行中",
+    pending: "等待",
+    running: "刷新中",
     success: "成功",
     failed: "失败",
-    skipped: "已跳过",
-    idle: "暂无任务"
+    skipped: "跳过",
+    idle: "空闲"
   };
-  return labels[status || ""] || formatNullable(status, "状态暂缺");
+  return labels[status || ""] || status || "暂无";
 }
 
 function tone(status?: string): "good" | "warn" | "bad" | "info" {
@@ -39,23 +30,17 @@ function tone(status?: string): "good" | "warn" | "bad" | "info" {
   return "warn";
 }
 
-function rows(status?: RefreshStatus | null) {
-  return (status?.steps || []).map((step: RefreshStepStatus) => ({
-    ...step,
-    step_label: stepLabel(step.step_name),
-    status_label: statusLabel(step.status),
-    output_count: step.output_files?.length || 0
-  }));
-}
-
 export function RefreshTaskPanel({ initialStatus, onAfterRefresh }: { initialStatus?: RefreshStatus; onAfterRefresh?: () => void }) {
   const [status, setStatus] = useState<RefreshStatus | null>(initialStatus || null);
+  const [taskId, setTaskId] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [running, setRunning] = useState<string | null>(null);
 
   const refreshStatus = () => {
     setError(null);
-    getRefreshStatus().then(setStatus).catch((err: Error) => setError(err.message || "刷新状态暂时无法加载。"));
+    getRefreshStatus()
+      .then(setStatus)
+      .catch((err: Error) => setError(err.message || "鐘舵€佽鍙栧け璐?"));
   };
 
   const run = (kind: "all" | "market" | "news" | "predictions" | "reports") => {
@@ -63,62 +48,50 @@ export function RefreshTaskPanel({ initialStatus, onAfterRefresh }: { initialSta
     setError(null);
     runRefreshTask(kind)
       .then((payload) => {
-        setStatus(payload);
+        setTaskId(payload.task_id || "");
         onAfterRefresh?.();
       })
-      .catch((err: Error) => setError(err.message || "刷新任务执行失败。"))
+      .catch((err: Error) => setError(err.message || "浠诲姟鍚姩澶辫触"))
       .finally(() => setRunning(null));
   };
 
   return (
     <SectionCard
-      title="数据刷新任务中心"
-      subtitle="一键刷新会依次尝试行情、新闻、事件、特征、预测和报告；失败步骤会保留原因，不会伪造数据。"
+      title="数据刷新"
+      subtitle="刷新中保留旧数据，完成后局部更新。"
       actions={
         <div className="button-row">
-          <button className="primary-button" type="button" onClick={() => run("all")} disabled={Boolean(running)}>
+          <ButtonWithTaskState disabled={Boolean(running)} isRunning={running === "all"} onClick={() => run("all")} taskKind="refresh-all" variant="primary">
             一键刷新数据
-          </button>
+          </ButtonWithTaskState>
           <button className="ghost-button" type="button" onClick={refreshStatus}>
-            查看刷新状态
+            查看状态
           </button>
         </div>
       }
     >
-      {error ? <ErrorState title="刷新任务异常" message={error} actionLabel="重新读取状态" onAction={refreshStatus} /> : null}
+      {error ? <ErrorState title="刷新异常" message={error} actionLabel="重试" onAction={refreshStatus} /> : null}
       <div className="metric-grid">
-        <MetricCard label="任务状态" value={statusLabel(status?.status)} hint={status?.message_zh || "暂无刷新任务记录"} tone={tone(status?.status)} />
-        <MetricCard label="任务编号" value={status?.run_id || "暂无任务"} />
-        <MetricCard label="开始时间" value={formatDateTime(status?.started_at)} />
-        <MetricCard label="完成时间" value={formatDateTime(status?.finished_at)} />
+        <MetricCard label="状态" value={statusLabel(status?.status)} hint={status?.message_zh || "暂无刷新任务"} tone={tone(status?.status)} />
+        <MetricCard label="任务" value={status?.run_id || taskId || "暂无"} />
+        <MetricCard label="开始" value={formatDateTime(status?.started_at)} />
+        <MetricCard label="完成" value={formatDateTime(status?.finished_at)} />
       </div>
       <div className="button-row">
-        <button className="ghost-button" type="button" onClick={() => run("market")} disabled={Boolean(running)}>
+        <ButtonWithTaskState disabled={Boolean(running)} isRunning={running === "market"} onClick={() => run("market")} taskKind="refresh-market" variant="ghost">
           刷新行情
-        </button>
-        <button className="ghost-button" type="button" onClick={() => run("news")} disabled={Boolean(running)}>
+        </ButtonWithTaskState>
+        <ButtonWithTaskState disabled={Boolean(running)} isRunning={running === "news"} onClick={() => run("news")} taskKind="refresh-news" variant="ghost">
           刷新新闻
-        </button>
-        <button className="ghost-button" type="button" onClick={() => run("predictions")} disabled={Boolean(running)}>
-          生成预测
-        </button>
-        <button className="ghost-button" type="button" onClick={() => run("reports")} disabled={Boolean(running)}>
+        </ButtonWithTaskState>
+        <ButtonWithTaskState disabled={Boolean(running)} isRunning={running === "predictions"} onClick={() => run("predictions")} taskKind="refresh-predictions" variant="ghost">
+          检查预测条件
+        </ButtonWithTaskState>
+        <ButtonWithTaskState disabled={Boolean(running)} isRunning={running === "reports"} onClick={() => run("reports")} taskKind="refresh-reports" variant="ghost">
           生成报告
-        </button>
-        {running ? <StatusPill label="任务执行中，请稍候" tone="info" /> : null}
+        </ButtonWithTaskState>
+        {running ? <StatusPill label="刷新中" tone="info" /> : null}
       </div>
-      <DataTable
-        data={rows(status) as Array<Record<string, unknown>>}
-        emptyLabel="暂无刷新步骤记录，请点击一键刷新数据。"
-        columns={[
-          { key: "step_label", title: "步骤" },
-          { key: "status_label", title: "状态", format: "status" },
-          { key: "message_zh", title: "说明", render: (row) => formatNullable(row.message_zh, "本步骤暂无说明") },
-          { key: "duration_seconds", title: "耗时(秒)", render: (row) => formatNumber(row.duration_seconds as number | null | undefined, 2) },
-          { key: "output_count", title: "输出文件数", format: "number" },
-          { key: "error", title: "错误", render: (row) => formatNullable(row.error, "无") }
-        ]}
-      />
     </SectionCard>
   );
 }

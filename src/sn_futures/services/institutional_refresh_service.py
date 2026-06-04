@@ -93,6 +93,42 @@ def refresh_managed_proxy(force: bool = False) -> dict[str, Any]:
     return refresh_managed_data_proxy(force=force)
 
 
+def refresh_tushare_futures(force: bool = False) -> dict[str, Any]:
+    from .tushare_futures_service import refresh_tushare_futures_data
+
+    return refresh_tushare_futures_data(force=force)
+
+
+def refresh_tushare_contracts() -> dict[str, Any]:
+    from .tushare_futures_service import fetch_fut_basic
+
+    return fetch_fut_basic()
+
+
+def refresh_tushare_daily() -> dict[str, Any]:
+    from .tushare_futures_service import fetch_sn_fut_daily
+
+    return fetch_sn_fut_daily()
+
+
+def refresh_tushare_warehouse() -> dict[str, Any]:
+    from .tushare_futures_service import fetch_sn_warehouse_receipt
+
+    return fetch_sn_warehouse_receipt()
+
+
+def refresh_tushare_settlement() -> dict[str, Any]:
+    from .tushare_futures_service import fetch_sn_settlement
+
+    return fetch_sn_settlement()
+
+
+def refresh_tushare_holding() -> dict[str, Any]:
+    from .tushare_futures_service import fetch_sn_holding
+
+    return fetch_sn_holding()
+
+
 def refresh_event_relevance() -> dict[str, Any]:
     from .news_relevance_service import refresh_news_relevance
 
@@ -133,6 +169,12 @@ def _run_institutional_refresh_all_unlocked(force: bool = False) -> dict[str, An
             "online_cross_market": lambda: refresh_online_cross_market(force=force),
             "online_lme_tin": lambda: refresh_online_lme_tin(force=force),
             "managed_data_proxy": lambda: refresh_managed_proxy(force=force),
+            "tushare_futures": lambda: refresh_tushare_futures(force=force),
+            "tushare_contracts": refresh_tushare_contracts,
+            "tushare_daily": refresh_tushare_daily,
+            "tushare_warehouse": refresh_tushare_warehouse,
+            "tushare_settlement": refresh_tushare_settlement,
+            "tushare_holding": refresh_tushare_holding,
             "cross_market": lambda: refresh_cross_market(force=force),
             "news": lambda: base.refresh_news_data(force=force),
             "event_relevance": refresh_event_relevance,
@@ -173,6 +215,7 @@ def _run_institutional_refresh_all_unlocked(force: bool = False) -> dict[str, An
             "online_cross_market",
             "online_lme_tin",
             "managed_data_proxy",
+            "tushare_futures",
             "cross_market",
             "news",
             "event_relevance",
@@ -211,6 +254,12 @@ def _run_institutional_refresh_steps_unlocked(step_names: list[str], *, force: b
         "online_cross_market": lambda: refresh_online_cross_market(force=force),
         "online_lme_tin": lambda: refresh_online_lme_tin(force=force),
         "managed_data_proxy": lambda: refresh_managed_proxy(force=force),
+        "tushare_futures": lambda: refresh_tushare_futures(force=force),
+        "tushare_contracts": refresh_tushare_contracts,
+        "tushare_daily": refresh_tushare_daily,
+        "tushare_warehouse": refresh_tushare_warehouse,
+        "tushare_settlement": refresh_tushare_settlement,
+        "tushare_holding": refresh_tushare_holding,
         "cross_market": lambda: refresh_cross_market(force=force),
         "news": lambda: base.refresh_news_data(force=force),
         "event_relevance": refresh_event_relevance,

@@ -1,5 +1,6 @@
 import { isValidElement } from "react";
 import { formatDateTime, formatNullable, formatNumber, formatPercent } from "../../utils/format";
+import { formatNextAction, formatStatusLabel, getStatusTone } from "../../utils/statusTaxonomy";
 import { EmptyState } from "./EmptyState";
 import { ErrorState } from "./ErrorState";
 import { LoadingState } from "./LoadingState";
@@ -16,14 +17,23 @@ function formatCell(value: unknown, format: DataTableColumn<unknown>["format"] =
   if (format === "number") return formatNumber(value as number | null | undefined);
   if (format === "percent") return formatPercent(value as number | null | undefined);
   if (format === "date") return formatDateTime(value);
+  if (format === "status") return formatStatusLabel(value);
   return formatNullable(value);
 }
 
-function statusTone(text: string): "good" | "warn" | "bad" | "neutral" | "info" {
-  if (text.includes("正常") || text.includes("可用")) return "info";
-  if (text.includes("失败") || text.includes("过期") || text.includes("错误")) return "bad";
-  if (text.includes("缓存") || text.includes("未配置") || text.includes("等待") || text.includes("谨慎")) return "warn";
-  return "neutral";
+type ColumnDescriptor = Pick<DataTableColumn<Record<string, unknown>>, "key" | "title" | "format">;
+
+function inferredFormat(column: ColumnDescriptor): DataTableColumn<unknown>["format"] {
+  const key = `${column.key} ${column.title}`.toLowerCase();
+  if (column.format) return column.format;
+  if (key.includes("status") || key.includes("state")) return "status";
+  return "text";
+}
+
+function formatActionCell(value: unknown, column: ColumnDescriptor): string | null {
+  const key = `${column.key} ${column.title}`.toLowerCase();
+  if (key.includes("next") || key.includes("action")) return formatNextAction(value);
+  return null;
 }
 
 export function DataTable<T extends Record<string, unknown>>({
@@ -63,10 +73,11 @@ export function DataTable<T extends Record<string, unknown>>({
                 if (isValidElement(raw)) {
                   return <td key={column.key}>{raw}</td>;
                 }
-                const text = formatCell(raw, column.format);
+                const resolvedFormat = inferredFormat(column);
+                const text = formatActionCell(raw, column) ?? formatCell(raw, resolvedFormat);
                 return (
                   <td key={column.key} title={text}>
-                    {column.format === "status" ? <StatusPill label={text} tone={statusTone(text)} /> : <span>{text}</span>}
+                    {resolvedFormat === "status" ? <StatusPill label={text} tone={getStatusTone(raw)} /> : <span>{text}</span>}
                   </td>
                 );
               })}

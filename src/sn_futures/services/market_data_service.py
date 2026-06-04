@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import time
 from datetime import datetime
 from pathlib import Path
@@ -17,6 +18,16 @@ from .freshness_policy import classify_freshness
 MIN_CHART_HISTORY_ROWS = 20
 MIN_ANALYSIS_HISTORY_ROWS = 60
 GOOD_HISTORY_ROWS = 120
+OPTIONAL_MARKET_PROVIDERS = (
+    "akshare_history",
+    "akshare_news",
+    "shfe_public",
+    "shfe_direct",
+)
+OPTIONAL_MARKET_PREFIXES = (
+    "akshare_futures_",
+    "akshare_news_",
+)
 
 
 def _now() -> str:
@@ -60,6 +71,45 @@ def _duration(started_perf: float) -> float:
     return round(time.perf_counter() - started_perf, 3)
 
 
+def is_optional_market_provider(provider_name: str, chain: str = "") -> bool:
+    provider = str(provider_name or "").strip().lower()
+    chain_name = str(chain or "").strip().lower()
+    if provider in OPTIONAL_MARKET_PROVIDERS:
+        return True
+    if any(provider.startswith(prefix) for prefix in OPTIONAL_MARKET_PREFIXES):
+        return True
+    return provider.startswith("akshare_") and chain_name in {"history", "news", "auxiliary"}
+
+
+def sanitize_provider_error_message(value: Any) -> str:
+    text = str(value or "")
+    if not text:
+        return ""
+
+    def _hide_windows_path(match: re.Match[str]) -> str:
+        filename = Path(match.group(1)).name
+        return f"[local-path-hidden]\\{filename}"
+
+    def _hide_posix_path(match: re.Match[str]) -> str:
+        filename = Path(match.group(1)).name
+        return f"[local-path-hidden]/{filename}"
+
+    text = re.sub(
+        r"[A-Za-z]:\\.*?([^\\/:*?\"<>|\r\n]+\.(?:dll|pyd|so|dylib|py|json|txt|log|csv))",
+        _hide_windows_path,
+        text,
+        flags=re.IGNORECASE,
+    )
+    text = re.sub(
+        r"/(?:[^/\r\n]+/)+([^/\r\n]+\.(?:dll|pyd|so|dylib|py|json|txt|log|csv))",
+        _hide_posix_path,
+        text,
+        flags=re.IGNORECASE,
+    )
+    text = re.sub(r"[A-Za-z]:\\[^\r\n;，。]+", "[local-path-hidden]", text)
+    return text
+
+
 def _provider_attempt(
     provider_name: str,
     *,
@@ -79,6 +129,12 @@ def _provider_attempt(
     symbol_used: str = "",
     request_params_sanitized: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
+    optional = is_optional_market_provider(provider_name, chain)
+    resolved_status = status_code or ("success" if success else "failed")
+    if optional and not success and resolved_status in {"failed", "error", "request_failed"}:
+        resolved_status = "optional_failed"
+    sanitized_error = sanitize_provider_error_message(error_message_zh)
+    blocking = bool(attempted and not success and not from_cache and not optional)
     return {
         "provider_name": provider_name,
         "chain": chain,
@@ -89,9 +145,12 @@ def _provider_attempt(
         "started_at": started_at,
         "finished_at": _now(),
         "duration_seconds": _duration(started_perf),
-        "status_code": status_code or ("success" if success else "failed"),
+        "status_code": resolved_status,
+        "optional": optional,
+        "blocking": blocking,
+        "severity": "success" if success else "optional_failed" if optional else "fatal",
         "error_type": error_type,
-        "error_message_zh": error_message_zh,
+        "error_message_zh": sanitized_error,
         "rows": rows,
         "row_count": rows,
         "latest_price": latest_price,
@@ -612,6 +671,13 @@ def merge_market_data(
 ) -> dict[str, Any]:
     realtime = realtime_result.get("quote") if isinstance(realtime_result.get("quote"), Mapping) else None
     history = history_result.get("history") if isinstance(history_result.get("history"), list) else []
+    history_attempts = [item for item in history_result.get("attempts", []) if isinstance(item, Mapping)]
+    shfe_attempts = [item for item in (shfe_aux_result or {}).get("attempts", []) if isinstance(item, Mapping)]
+    optional_source_failures = [
+        dict(item)
+        for item in history_attempts + shfe_attempts
+        if str(item.get("status_code") or item.get("status") or "") == "optional_failed"
+    ]
     if cache_result is None:
         realtime_cache = load_last_good_realtime_quote()
         history_cache = load_last_good_market_history()
@@ -680,10 +746,19 @@ def merge_market_data(
         next_actions_zh.append("等待实时/历史 provider 恢复后重新刷新。")
     if final_status == "failed":
         next_actions_zh.append("检查网络、AKShare 安装、Sina 访问和本地日志。")
+    if realtime_is_real and optional_source_failures:
+        blocking_reasons = []
+    market_status = "failed" if final_status == "failed" else "usable"
+    warnings_zh = [
+        f"AKShare 可选源失败，不影响主行情：{item.get('error_message_zh') or item.get('message_zh') or item.get('provider_name')}"
+        for item in optional_source_failures
+    ]
 
     return {
         "generated_at": _now(),
         "final_status": final_status,
+        "market_status": market_status,
+        "market_usable": market_status == "usable",
         "success": final_status != "failed",
         "message_zh": message_zh,
         "latest_price": latest_price,
@@ -706,6 +781,8 @@ def merge_market_data(
         "cache_status": _cache_status(realtime_cache, history_cache),
         "blocking_reasons": blocking_reasons,
         "next_actions_zh": _unique(next_actions_zh),
+        "optional_source_failures": optional_source_failures,
+        "warnings_zh": warnings_zh,
     }
 
 

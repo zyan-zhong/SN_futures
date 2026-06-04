@@ -1,6 +1,7 @@
-import { useEffect, useRef } from "react";
-import ReactECharts from "echarts-for-react";
+import { lazy, Suspense, useEffect, useRef } from "react";
 import { ErrorBoundary } from "../common/ErrorBoundary";
+
+const ReactECharts = lazy(() => import("echarts-for-react"));
 
 export function ChartBox({
   option,
@@ -29,14 +30,16 @@ export function ChartBox({
   return (
     <ErrorBoundary moduleName={ariaLabel}>
       <div className="chart-shell" ref={containerRef} role="img" style={{ minHeight }} aria-label={ariaLabel}>
-        <ReactECharts
-          ref={chartRef}
-          notMerge
-          lazyUpdate
-          opts={{ renderer: "canvas" }}
-          style={{ height: "100%", minHeight }}
-          option={option}
-        />
+        <Suspense fallback={<div className="chart-loading">图表组件加载中...</div>}>
+          <ReactECharts
+            ref={chartRef}
+            notMerge
+            lazyUpdate
+            opts={{ renderer: "canvas" }}
+            style={{ height: "100%", minHeight }}
+            option={option}
+          />
+        </Suspense>
       </div>
     </ErrorBoundary>
   );

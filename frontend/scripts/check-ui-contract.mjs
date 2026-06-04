@@ -3,7 +3,14 @@ import path from "node:path";
 
 const root = process.cwd();
 const scanRoots = [path.join(root, "src"), path.join(root, "index.html")];
-const allowedLocalStorageKeys = new Set(["firstRunCompleted", "showDebug", "refreshInterval", "theme", "showSampleData"]);
+const allowedLocalStorageKeys = new Set([
+  "firstRunCompleted",
+  "showDebug",
+  "refreshInterval",
+  "theme",
+  "showSampleData",
+  "autoStopBackendOnClose"
+]);
 const forbiddenTerms = [
   ["保证", "盈利"].join(""),
   ["稳", "赚"].join(""),

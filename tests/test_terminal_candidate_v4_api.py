@@ -4,6 +4,7 @@ import json
 import os
 import sys
 import tempfile
+import time
 from pathlib import Path
 from unittest.mock import patch
 
@@ -35,10 +36,23 @@ def test_candidate_v4_api_blocks_without_increment_and_does_not_publish_active()
     with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {"SN_DATA_DIR": tmp}, clear=False):
         _write_market(tmp)
         status, payload = handle_terminal_api("/api/terminal/research/run-candidate-v4", "POST", {}, {"horizons": ["1d"]})
+        final = _wait_for_task(str(payload["task_id"]))
         output = Path(tmp) / "outputs"
 
     assert status == 200
-    assert payload["status"] == "blocked"
-    assert "没有真实新增 cross-market 或 event 字段" in payload["reason_zh"]
+    assert payload["kind"] == "train_candidate"
+    result = final.get("result", {})
+    assert result["status"] == "blocked"
+    assert "没有真实新增 cross-market 或 event 字段" in result["reason_zh"]
     assert not (output / "model_registry" / "active_model.json").exists()
     assert not (output / "sn_live_predictions.json").exists()
+
+
+def _wait_for_task(task_id: str) -> dict:
+    for _ in range(80):
+        _, payload = handle_terminal_api("/api/terminal/tasks/status", "GET", query={"id": [task_id]})
+        if payload.get("status") in {"success", "failed"}:
+            time.sleep(0.05)
+            return payload
+        time.sleep(0.025)
+    return {}

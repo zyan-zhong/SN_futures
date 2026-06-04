@@ -15,6 +15,7 @@ from .runtime import get_user_output_dir
 from .settings_store import load_api_keys
 from .news_store import upsert_articles
 from .event_store import ingest_articles, update_provider_status
+from .utils.secret_sanitizer import sanitize_mapping
 
 
 def _safe_float(values: list[str], index: int) -> float | None:
@@ -905,6 +906,7 @@ def persist_live_snapshot(snapshot: dict[str, Any]) -> None:
     output_dir = get_user_output_dir()
     try:
         output_dir.mkdir(parents=True, exist_ok=True)
+        snapshot = sanitize_mapping(snapshot)
         recent_ticks = _append_realtime_tick(snapshot, output_dir)
         if recent_ticks:
             snapshot["recent_ticks"] = recent_ticks

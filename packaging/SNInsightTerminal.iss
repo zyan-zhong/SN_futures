@@ -1,5 +1,5 @@
 #define MyAppName "SNInsightTerminal"
-#define MyAppVersion "0.3.8-private-research-beta.1"
+#define MyAppVersion "0.4.3-private-research-beta.1"
 #define MyAppPublisher "SNInsightTerminal"
 #define MyAppExeName "SNInsightTerminal.exe"
 

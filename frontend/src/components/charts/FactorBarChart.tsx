@@ -3,8 +3,9 @@ import { EmptyState } from "../common/EmptyState";
 import { ChartBox } from "./ChartBox";
 
 export function FactorBarChart({ data }: { data?: Array<{ name: string; value: number }> }) {
-  if (!data?.length) return <EmptyState label="暂无完整因子诊断数据，请先运行因子诊断任务" />;
-  const cleaned = data.map((item) => ({ name: item.name || "因子", value: toFiniteNumber(item.value) }));
+  const rows = Array.isArray(data) ? data : [];
+  if (!rows.length) return <EmptyState label="暂无完整因子诊断数据，请先运行因子诊断任务" />;
+  const cleaned = rows.map((item) => ({ name: item.name || "因子", value: toFiniteNumber(item.value) }));
   return (
     <ChartBox
       minHeight={280}

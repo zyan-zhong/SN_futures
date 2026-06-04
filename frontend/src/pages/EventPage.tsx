@@ -28,6 +28,20 @@ function categoryLabel(value?: string): string {
   return labels[String(value || "other")] || "其他";
 }
 
+function textList(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value.map((item) => String(item || "").trim()).filter(Boolean);
+  }
+  if (value === null || value === undefined) return [];
+  if (typeof value === "string") {
+    return value
+      .split(/[,，;；]/)
+      .map((item) => item.trim())
+      .filter(Boolean);
+  }
+  return [String(value).trim()].filter(Boolean);
+}
+
 export function EventPage({
   onNavigate,
   showSampleData = true
@@ -87,11 +101,11 @@ export function EventPage({
     { key: "sentiment_score", title: "情绪分", render: (row: NewsEventItem) => formatNumber(row.sentiment_score, 2) },
     { key: "relevance_score", title: "相关性分数", render: (row: NewsEventItem) => formatNumber(row.relevance_score, 2) },
     { key: "used_in_model", title: "是否入模", render: (row: NewsEventItem) => (row.used_in_model ? "已入模" : "未入模") },
-    { key: "keyword_hits", title: "关键词证据", render: (row: NewsEventItem) => (row.keyword_hits || []).join(", ") || "数据暂缺" },
+    { key: "keyword_hits", title: "关键词证据", render: (row: NewsEventItem) => textList(row.keyword_hits).join(", ") || "数据暂缺" },
     {
       key: "negative_keyword_hits",
       title: "负面命中",
-      render: (row: NewsEventItem) => (row.negative_keyword_hits || []).join(", ") || "无"
+      render: (row: NewsEventItem) => textList(row.negative_keyword_hits).join(", ") || "无"
     },
     { key: "exclusion_reason", title: "排除原因", render: (row: NewsEventItem) => row.exclusion_reason || "数据暂缺" },
     { key: "url", title: "原文", render: (row: NewsEventItem) => (row.url ? "可打开" : "数据暂缺") }

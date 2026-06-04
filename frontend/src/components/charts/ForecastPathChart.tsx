@@ -4,7 +4,7 @@ import { EmptyState } from "../common/EmptyState";
 import { ChartBox } from "./ChartBox";
 
 export function ForecastPathChart({ forecastPath }: { forecastPath?: ForecastPathPayload | null }) {
-  const points = forecastPath?.points || [];
+  const points = Array.isArray(forecastPath?.points) ? forecastPath.points : [];
   if (!points.length) {
     return <EmptyState label={forecastPath?.message_zh || "暂无预测路径数据，请点击生成预测或一键刷新数据。"} />;
   }

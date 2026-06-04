@@ -36,6 +36,12 @@ class SecretSanitizerTest(unittest.TestCase):
         self.assertTrue(contains_secret_like_value("Authorization: Bearer TOKEN_SECRET_123456"))
         self.assertFalse(contains_secret_like_value("NewsAPI status is key_missing"))
 
+    def test_sanitize_text_masks_provider_error_that_echoes_api_key(self) -> None:
+        raw = "We have detected your API key as PROVIDER_SECRET_123456 and the daily API rate limit is 25."
+        cleaned = sanitize_text(raw)
+        self.assertNotIn("PROVIDER_SECRET_123456", cleaned)
+        self.assertIn("***", cleaned)
+
 
 if __name__ == "__main__":
     unittest.main()

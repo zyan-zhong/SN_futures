@@ -19,7 +19,11 @@ frontend/vite.config.d.ts
 
 # Runtime state, generated cache, and local data
 .env
+.env.local
 !.env.example
+config/managed_proxy.local.json
+config/managed_proxy.mapping.local.json
+secrets/
 app_data/cache/
 app_data/tmp/
 app_data/downloads/

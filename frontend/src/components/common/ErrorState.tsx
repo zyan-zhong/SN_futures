@@ -1,6 +1,14 @@
 import { COPY } from "../../utils/copy";
 import { sanitizeRecord } from "../../utils/sanitize";
 
+function summarizeDetails(details: unknown): string {
+  const safe = sanitizeRecord(details);
+  if (!safe || typeof safe !== "object") return String(safe ?? "empty");
+  return Object.entries(safe as Record<string, unknown>)
+    .map(([key, value]) => `${key}: ${String(value ?? "").slice(0, 160)}`)
+    .join(" | ");
+}
+
 export function ErrorState({
   title = "模块加载失败",
   message,
@@ -42,10 +50,9 @@ export function ErrorState({
       {details ? (
         <details className="debug-panel">
           <summary>{COPY.debugTitle}</summary>
-          <pre>{JSON.stringify(sanitizeRecord(details), null, 2)}</pre>
+          <code className="debug-summary">{summarizeDetails(details)}</code>
         </details>
       ) : null}
     </div>
   );
 }
-

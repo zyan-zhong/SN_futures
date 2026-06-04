@@ -1,14 +1,19 @@
 import { useCallback, useState } from "react";
 import {
+  buildSystemRepairPlan,
   getDataStatus,
+  generateFullSystemTxtReport,
   getKeyDiagnostics,
+  getLatestFullSystemTxtReport,
+  getProcessStatus,
   getSettingsStatus,
   getSystemHealth,
   resetSettingsSecrets,
   saveSettingsSecrets,
+  shutdownBackend,
   testProvider
 } from "../api/terminal";
-import type { DataSourceStatus, KeyDiagnosticsPayload, SystemHealth, TerminalSettingsStatus } from "../api/types";
+import type { DataSourceStatus, KeyDiagnosticsPayload, ProcessStatusPayload, SystemHealth, SystemRepairPlanPayload, TerminalSettingsStatus } from "../api/types";
 import { ErrorState } from "../components/common/ErrorState";
 import { LoadingState } from "../components/common/LoadingState";
 import { MetricCard } from "../components/common/MetricCard";
@@ -17,6 +22,7 @@ import { SectionCard } from "../components/layout/SectionCard";
 import { TrainingDatasetStatusPanel } from "../components/model/TrainingDatasetStatusPanel";
 import { useLocalSetting } from "../hooks/useLocalSetting";
 import { usePolling } from "../hooks/usePolling";
+import { useUIMode } from "../context/UIModeContext";
 import { formatDateTime, formatNullable } from "../utils/format";
 
 type SaveMode = "alpha" | "news" | "both";
@@ -27,20 +33,34 @@ export function SettingsPage() {
   const [refreshMs, setRefreshMs] = useLocalSetting("refreshInterval", 30000);
   const [showDebug, setShowDebug] = useLocalSetting("showDebug", false);
   const [showSampleData, setShowSampleData] = useLocalSetting("showSampleData", true);
+  const [autoStopBackendOnClose, setAutoStopBackendOnClose] = useLocalSetting("autoStopBackendOnClose", true);
+  const { uiMode, setUIMode } = useUIMode();
   const [alphaKey, setAlphaKey] = useState("");
   const [newsKey, setNewsKey] = useState("");
   const [managedToken, setManagedToken] = useState("");
+  const [managedEndpoint, setManagedEndpoint] = useState("");
+  const [tushareToken, setTushareToken] = useState("");
   const [showAlpha, setShowAlpha] = useState(false);
   const [showNews, setShowNews] = useState(false);
   const [showManagedToken, setShowManagedToken] = useState(false);
+  const [showTushareToken, setShowTushareToken] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [confirmReset, setConfirmReset] = useState(false);
   const [dataSources, setDataSources] = useState<DataSourceStatus[]>([]);
   const [systemHealth, setSystemHealth] = useState<SystemHealth | null>(null);
   const [testing, setTesting] = useState(false);
+  const [reportBusy, setReportBusy] = useState(false);
+  const [fullReportPath, setFullReportPath] = useState("");
+  const [fullReportJsonPath, setFullReportJsonPath] = useState("");
+  const [diagnosticsBundlePath, setDiagnosticsBundlePath] = useState("");
+  const [fullReportPreview, setFullReportPreview] = useState("");
+  const [repairPlanBusy, setRepairPlanBusy] = useState(false);
+  const [repairPlan, setRepairPlan] = useState<SystemRepairPlanPayload | null>(null);
   const [keyDiagnostics, setKeyDiagnostics] = useState<KeyDiagnosticsPayload | null>(null);
   const [testingProvider, setTestingProvider] = useState<string | null>(null);
+  const [processStatus, setProcessStatus] = useState<ProcessStatusPayload | null>(null);
+  const [shutdownBusy, setShutdownBusy] = useState(false);
 
   async function saveSecrets(mode: SaveMode) {
     const payload: { SN_ALPHA_VANTAGE_KEY?: string; SN_NEWSAPI_KEY?: string } = {};
@@ -68,12 +88,33 @@ export function SettingsPage() {
     setSaving(true);
     setMessage(null);
     try {
-      const result = await saveSettingsSecrets({ SN_MANAGED_DATA_PROXY_TOKEN: managedToken.trim() });
-      if (result.success) setManagedToken("");
+      const result = await saveSettingsSecrets({
+        SN_MANAGED_DATA_PROXY_TOKEN: managedToken.trim(),
+        SN_MANAGED_DATA_PROXY_URL: managedEndpoint.trim()
+      });
+      if (result.success) {
+        setManagedToken("");
+        setManagedEndpoint("");
+      }
       setMessage(result.message_zh || "托管数据服务 token 已保存到本机用户目录。");
       await refresh();
     } catch (exc) {
       setMessage(exc instanceof Error ? exc.message : "保存托管数据服务 token 失败。");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function saveTushareToken() {
+    setSaving(true);
+    setMessage(null);
+    try {
+      const result = await saveSettingsSecrets({ SN_TUSHARE_TOKEN: tushareToken.trim() });
+      if (result.success) setTushareToken("");
+      setMessage(result.message_zh || "Tushare token 已保存到本机用户目录。");
+      await refresh();
+    } catch (exc) {
+      setMessage(exc instanceof Error ? exc.message : "保存 Tushare token 失败。");
     } finally {
       setSaving(false);
     }
@@ -105,14 +146,107 @@ export function SettingsPage() {
     setTesting(true);
     setMessage(null);
     try {
-      const [sources, health] = await Promise.all([getDataStatus(), getSystemHealth()]);
+      const [sources, health, process] = await Promise.all([getDataStatus(), getSystemHealth(), getProcessStatus()]);
       setDataSources(sources);
       setSystemHealth(health);
+      setProcessStatus(process);
       setMessage("连接检查完成；未配置的数据源会显示为未配置，不影响进入终端。");
     } catch (exc) {
       setMessage(exc instanceof Error ? exc.message : "连接检查失败，请确认后端正在运行。");
     } finally {
       setTesting(false);
+    }
+  }
+
+  async function refreshProcessStatus() {
+    const payload = await getProcessStatus();
+    setProcessStatus(payload);
+    return payload;
+  }
+
+  async function stopBackendService() {
+    setShutdownBusy(true);
+    setMessage(null);
+    try {
+      const result = await shutdownBackend("settings_page");
+      setMessage(result.message_zh || "后台服务关闭请求已发送。");
+      setProcessStatus((previous) => ({
+        ...(previous || {}),
+        shutdown_requested: true,
+        pid_file_exists: false,
+        pid_running: false,
+        shutdown_at: result.shutdown_at
+      }));
+    } catch (exc) {
+      setMessage(exc instanceof Error ? exc.message : "停止后台服务失败。");
+    } finally {
+      setShutdownBusy(false);
+    }
+  }
+
+  async function generateFullReport() {
+    setReportBusy(true);
+    setMessage(null);
+    try {
+      const result = await generateFullSystemTxtReport();
+      const latest = await getLatestFullSystemTxtReport();
+      const path = String(result.latest_txt_path || result.txt_path || latest.txt_path || "");
+      const jsonPath = String(result.json_path || latest.json_path || "");
+      const bundlePath = String(result.diagnostics_bundle_path || latest.diagnostics_bundle_path || result.summary?.diagnostics_bundle_path || "");
+      setFullReportPath(path);
+      setFullReportJsonPath(jsonPath);
+      setDiagnosticsBundlePath(bundlePath);
+      setFullReportPreview(String(latest.text_preview || ""));
+      setMessage(path ? "完整系统 TXT 报告已生成。" : "完整系统 TXT 报告已生成，路径见报告中心。");
+    } catch (exc) {
+      setMessage(exc instanceof Error ? exc.message : "完整系统 TXT 报告生成失败。");
+    } finally {
+      setReportBusy(false);
+    }
+  }
+
+  async function copyFullReportSummary() {
+    const text = fullReportPreview || `TXT: ${fullReportPath}\nZIP: ${diagnosticsBundlePath}`;
+    try {
+      await navigator.clipboard?.writeText(text);
+      setMessage("报告摘要已复制。");
+    } catch {
+      setMessage("浏览器未允许复制；请直接使用页面显示的路径。");
+    }
+  }
+
+  async function generateRepairPlan() {
+    setRepairPlanBusy(true);
+    setMessage(null);
+    try {
+      const result = await buildSystemRepairPlan();
+      setRepairPlan(result);
+      setMessage(result.status === "success" ? "系统修复计划已生成。" : result.message_zh || "系统修复计划已更新。");
+    } catch (exc) {
+      setMessage(exc instanceof Error ? exc.message : "系统修复计划生成失败。");
+    } finally {
+      setRepairPlanBusy(false);
+    }
+  }
+
+  function repairPlanSummaryText() {
+    const issues = repairPlan?.issues || [];
+    const header = [
+      `overall_status: ${repairPlan?.overall_status || "unknown"}`,
+      `repair_plan_md: ${repairPlan?.markdown_path || "not_generated"}`,
+      `active_updated: ${repairPlan?.active_updated ? "true" : "false"}`,
+      `customer_prediction_generated: ${repairPlan?.customer_prediction_generated ? "true" : "false"}`
+    ];
+    const rows = issues.map((issue) => `${issue.priority || "P?"} ${issue.id || "ISSUE"} ${issue.title || "Untitled"} | ${issue.evidence || "No evidence"}`);
+    return [...header, ...rows].join("\n");
+  }
+
+  async function copyRepairPlanSummary() {
+    try {
+      await navigator.clipboard?.writeText(repairPlanSummaryText());
+      setMessage("修复摘要已复制。");
+    } catch {
+      setMessage("浏览器未允许复制；请直接使用页面显示的修复计划路径。");
     }
   }
 
@@ -136,11 +270,57 @@ export function SettingsPage() {
     }
   }
 
+  async function testTushareKey() {
+    setTestingProvider("tushare");
+    setMessage(null);
+    try {
+      const result = await testProvider("tushare");
+      await loadKeyDiagnostics();
+      setMessage(result.message_zh || "Tushare token 验证完成。");
+    } catch (exc) {
+      setMessage(exc instanceof Error ? exc.message : "Tushare token 验证失败。");
+    } finally {
+      setTestingProvider(null);
+    }
+  }
+
+  async function testManagedProxy() {
+    setTestingProvider("managed_proxy");
+    setMessage(null);
+    try {
+      const result = await testProvider("managed_proxy");
+      await loadKeyDiagnostics();
+      setMessage(result.message_zh || "托管数据服务连接测试完成。");
+    } catch (exc) {
+      setMessage(exc instanceof Error ? exc.message : "托管数据服务连接测试失败。");
+    } finally {
+      setTestingProvider(null);
+    }
+  }
+
   const apiAddress = status?.api_base_url || window.location.origin;
   const terminalAddress = status?.terminal_url || `${window.location.origin}/terminal`;
+  const repairIssues = repairPlan?.issues || [];
+  const repairIssueGroups = (["P0", "P1", "P2"] as const).map((priority) => ({
+    priority,
+    issues: repairIssues.filter((issue) => issue.priority === priority)
+  }));
+  const repairPlanTone = repairPlan?.overall_status === "research_ready" ? "good" : repairPlan?.overall_status === "blocked_for_prediction" ? "bad" : "warn";
 
   return (
     <div className="page-stack">
+      <SectionCard title="显示模式" subtitle="默认启动模式：简洁；需要完整链路时切换专业。">
+        <div className="button-row">
+          <button className={uiMode === "simple" ? "secondary-button active" : "secondary-button"} type="button" onClick={() => setUIMode("simple")}>
+            简洁
+          </button>
+          <button className={uiMode === "professional" ? "secondary-button active" : "secondary-button"} type="button" onClick={() => setUIMode("professional")}>
+            专业
+          </button>
+        </div>
+        <p className="muted">简洁模式只保留核心入口；专业模式显示完整工作台。</p>
+      </SectionCard>
+
       <SectionCard
         title="发行方默认 key"
         subtitle="私有发行版可预配置 Alpha Vantage 与 NewsAPI；客户安装后可直接使用，也可以在本页替换为自己的 key。"
@@ -278,17 +458,74 @@ export function SettingsPage() {
         <p className="muted">如果出现 rate_limited、key_invalid 或 network_failed，请按状态提示处理；完整 key 不会返回到前端。</p>
       </SectionCard>
 
-      <SectionCard title="托管数据服务" subtitle="面向正式客户的免 CSV/Excel 数据补齐通道；默认关闭，不影响本地终端使用。">
+      <SectionCard title="Tushare 期货基础数据" subtitle="配置 SN_TUSHARE_TOKEN 后可刷新沪锡合约信息、日线、仓单、结算参数、持仓排名和交易日历；不用于实盘交易。">
+        <div className="metric-grid">
+          <MetricCard
+            label="Tushare"
+            value={status?.tushare_configured ? "已配置" : "未配置"}
+            hint={`${status?.tushare_masked || "可稍后配置"} / ${status?.tushare_source_label_zh || status?.tushare_source || "none"}`}
+            tone={status?.tushare_configured ? "good" : "warn"}
+          />
+          <MetricCard
+            label="用途"
+            value="期货基础数据"
+            hint="用于 fut_basic / trade_cal / fut_daily / fut_wsr / fut_settle / fut_holding，不用于实盘交易。"
+            tone="neutral"
+          />
+        </div>
+        <div className="settings-grid secret-form">
+          <label>
+            Tushare token
+            <div className="inline-input-action">
+              <input
+                autoComplete="off"
+                type={showTushareToken ? "text" : "password"}
+                value={tushareToken}
+                onChange={(event) => setTushareToken(event.target.value)}
+                placeholder="留空则不修改"
+                aria-label="Tushare token"
+              />
+              <button className="ghost-button" type="button" onClick={() => setShowTushareToken((value) => !value)}>
+                {showTushareToken ? "隐藏" : "显示"}
+              </button>
+            </div>
+          </label>
+        </div>
+        <div className="button-row">
+          <button className="primary-button" disabled={saving || !tushareToken.trim()} type="button" onClick={() => void saveTushareToken()}>
+            保存 Tushare token
+          </button>
+          <button className="ghost-button" disabled={testingProvider === "tushare"} type="button" onClick={() => void testTushareKey()}>
+            {testingProvider === "tushare" ? "正在测试 Tushare..." : "测试 Tushare"}
+          </button>
+        </div>
+        <p className="warning-text">SN_TUSHARE_TOKEN 只保存在本机用户目录，API 和前端仅显示 masked/source/configured，不返回完整 token。</p>
+      </SectionCard>
+
+      <SectionCard title="托管数据服务" subtitle="客户无需 CSV/Excel；可选托管字段补齐通道默认关闭，不影响本地终端。">
         <div className="metric-grid">
           <MetricCard
             label="托管服务"
-            value={status?.managed_data_proxy_configured ? "已配置" : "未配置"}
-            hint={status?.managed_data_proxy_masked || "可稍后配置"}
-            tone={status?.managed_data_proxy_configured ? "good" : "warn"}
+            value={status?.managed_data_proxy_configured && status?.managed_data_proxy_endpoint_configured ? "已配置" : "未配置"}
+            hint={`${status?.managed_data_proxy_masked || "可稍后配置"} / endpoint: ${status?.managed_data_proxy_endpoint_configured ? "已配置" : "未配置"}`}
+            tone={status?.managed_data_proxy_configured && status?.managed_data_proxy_endpoint_configured ? "good" : "warn"}
           />
-          <MetricCard label="客户上传文件" value="否" hint="客户无需 CSV/Excel；系统会优先尝试在线数据源。" tone="good" />
+          <MetricCard label="客户上传文件" value="否" hint="系统会优先尝试在线数据源。" tone="good" />
         </div>
         <div className="settings-grid secret-form">
+          <label>
+            托管数据服务 endpoint
+            <div className="inline-input-action">
+              <input
+                autoComplete="off"
+                type="text"
+                value={managedEndpoint}
+                onChange={(event) => setManagedEndpoint(event.target.value)}
+                placeholder={status?.managed_data_proxy_endpoint || "https://issuer.example"}
+                aria-label="托管数据服务 endpoint"
+              />
+            </div>
+          </label>
           <label>
             托管数据服务 license token
             <div className="inline-input-action">
@@ -307,15 +544,16 @@ export function SettingsPage() {
           </label>
         </div>
         <div className="button-row">
-          <button className="primary-button" disabled={saving || !managedToken.trim()} type="button" onClick={() => void saveManagedProxyToken()}>
-            保存托管服务 token
+          <button className="primary-button" disabled={saving || (!managedToken.trim() && !managedEndpoint.trim())} type="button" onClick={() => void saveManagedProxyToken()}>
+            保存托管服务 token / endpoint
           </button>
           <button
             className="ghost-button"
+            disabled={testingProvider === "managed_proxy"}
             type="button"
-            onClick={() => setMessage("托管数据服务客户端接口已就绪；正式服务器上线后可测试连接。")}
+            onClick={() => void testManagedProxy()}
           >
-            测试连接说明
+            {testingProvider === "managed_proxy" ? "正在测试托管服务..." : "测试托管服务"}
           </button>
         </div>
         <p className="warning-text">
@@ -389,6 +627,50 @@ export function SettingsPage() {
         </div>
       </SectionCard>
 
+      <SectionCard title="后台服务生命周期" subtitle="关闭终端时默认停止本机后台服务；不会关闭浏览器，也不会杀无关 Python 进程。">
+        <div className="metric-grid">
+          <MetricCard
+            label="后台 PID"
+            value={processStatus?.pid ? String(processStatus.pid) : "未读取"}
+            hint={processStatus?.pid_running ? "运行中" : processStatus?.shutdown_requested ? "已请求关闭" : "点击刷新状态"}
+            tone={processStatus?.pid_running ? "good" : "warn"}
+          />
+          <MetricCard
+            label="后台端口"
+            value={processStatus?.port ? String(processStatus.port) : "未读取"}
+            hint={processStatus?.host || "127.0.0.1"}
+            tone="neutral"
+          />
+          <MetricCard
+            label="Session"
+            value={processStatus?.session_id || "未读取"}
+            hint={processStatus?.started_at ? `启动：${formatDateTime(processStatus.started_at)}` : "后台启动后写入 runtime/session"}
+            tone="neutral"
+          />
+          <MetricCard
+            label="关闭设置"
+            value={autoStopBackendOnClose ? "已开启" : "已关闭"}
+            hint="关闭终端时自动停止后台服务"
+            tone={autoStopBackendOnClose ? "good" : "warn"}
+          />
+        </div>
+        <div className="settings-grid">
+          <label className="checkbox-line">
+            <input checked={autoStopBackendOnClose} type="checkbox" onChange={(event) => setAutoStopBackendOnClose(event.target.checked)} />
+            关闭终端时自动停止后台服务
+          </label>
+        </div>
+        <div className="button-row">
+          <button className="secondary-button" type="button" onClick={() => void refreshProcessStatus()}>
+            刷新后台状态
+          </button>
+          <button className="danger-button" disabled={shutdownBusy} type="button" onClick={() => void stopBackendService()}>
+            {shutdownBusy ? "正在停止后台服务..." : "停止后台服务"}
+          </button>
+        </div>
+        <p className="muted">停止后台服务会释放本机 API 端口；如需继续使用终端，请重新启动 SNInsightTerminal。</p>
+      </SectionCard>
+
       <SectionCard title="前端偏好" subtitle="只保存界面偏好，不保存任何数据源密钥。">
         <div className="settings-grid">
           <label>
@@ -405,6 +687,107 @@ export function SettingsPage() {
           </label>
         </div>
         <p className="warning-text">样例数据仅用于演示界面结构，不代表真实行情或预测；点击一键刷新数据后，真实缓存优先显示。</p>
+      </SectionCard>
+
+      <SectionCard title="完整系统 TXT 报告" subtitle="生成系统运行、数据、模型、回测、性能、错误和建议摘要；不包含完整 key。">
+        <div className="button-row">
+          <button className="primary-button" disabled={reportBusy} type="button" onClick={() => void generateFullReport()}>
+            {reportBusy ? "正在生成完整 TXT 报告..." : "生成完整系统 TXT 报告"}
+          </button>
+          <button className="secondary-button" disabled={!fullReportPath} type="button" onClick={() => setMessage(fullReportPath ? `下载 TXT：${fullReportPath}` : "请先生成报告。")}>
+            下载 TXT
+          </button>
+          <button className="secondary-button" disabled={!diagnosticsBundlePath} type="button" onClick={() => setMessage(diagnosticsBundlePath ? `下载诊断包：${diagnosticsBundlePath}` : "请先生成报告。")}>
+            下载诊断包
+          </button>
+          <button className="ghost-button" disabled={!fullReportPath && !fullReportPreview} type="button" onClick={() => void copyFullReportSummary()}>
+            复制摘要
+          </button>
+          {fullReportPath ? <StatusPill label="已生成" tone="good" /> : null}
+        </div>
+        {fullReportPath ? (
+          <div className="status-table">
+            <div className="status-row">
+              <span>最新 TXT 报告</span>
+              <strong>{fullReportPath}</strong>
+            </div>
+            <div className="status-row">
+              <span>JSON 报告</span>
+              <strong>{fullReportJsonPath || "待生成"}</strong>
+            </div>
+            <div className="status-row">
+              <span>诊断包 ZIP</span>
+              <strong>{diagnosticsBundlePath || "待生成"}</strong>
+            </div>
+          </div>
+        ) : (
+          <p className="muted">报告会写入 outputs/reports；报告中心可展示和下载 latest 版本。</p>
+        )}
+      </SectionCard>
+
+      <SectionCard title="系统修复计划" subtitle="读取最新 full_system_report 和诊断产物生成 P0/P1/P2 修复清单；不训练、不发布 active、不生成客户预测。">
+        <div className="button-row">
+          <button className="primary-button" disabled={repairPlanBusy} type="button" onClick={() => void generateRepairPlan()}>
+            {repairPlanBusy ? "正在生成系统修复计划..." : "生成系统修复计划"}
+          </button>
+          <button
+            className="secondary-button"
+            disabled={!repairPlan?.markdown_path}
+            type="button"
+            onClick={() => setMessage(repairPlan?.markdown_path ? `下载 repair_plan.md：${repairPlan.markdown_path}` : "请先生成系统修复计划。")}
+          >
+            下载 repair_plan.md
+          </button>
+          <button className="ghost-button" disabled={!repairIssues.length} type="button" onClick={() => void copyRepairPlanSummary()}>
+            复制修复摘要
+          </button>
+          {repairPlan ? <StatusPill label={repairPlan.overall_status || "已生成"} tone={repairPlanTone} /> : null}
+        </div>
+
+        {repairPlan?.markdown_path ? (
+          <div className="status-table">
+            <div className="status-row">
+              <span>Markdown 修复计划</span>
+              <strong>{repairPlan.markdown_path}</strong>
+            </div>
+            <div className="status-row">
+              <span>JSON 修复计划</span>
+              <strong>{repairPlan.json_path || "待生成"}</strong>
+            </div>
+            <div className="status-row">
+              <span>安全边界</span>
+              <strong>
+                active_updated={repairPlan.active_updated ? "true" : "false"} / customer_prediction_generated=
+                {repairPlan.customer_prediction_generated ? "true" : "false"}
+              </strong>
+            </div>
+          </div>
+        ) : (
+          <p className="muted">生成后会写入 outputs/diagnostics/system_repair_plan.md 和 system_repair_plan.json。</p>
+        )}
+
+        {repairIssues.length ? (
+          <div className="two-column">
+            {repairIssueGroups.map((group) => (
+              <div className="explain-block" key={group.priority}>
+                <h4>{group.priority}</h4>
+                {group.issues.length ? (
+                  <ul>
+                    {group.issues.map((issue) => (
+                      <li key={issue.id || `${group.priority}-${issue.title}`}>
+                        <strong>{issue.id || "ISSUE"}</strong> {issue.title || "未命名问题"}
+                        <br />
+                        <span>{issue.evidence || "暂无证据摘要"}</span>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="muted">暂无 {group.priority} 问题。</p>
+                )}
+              </div>
+            ))}
+          </div>
+        ) : null}
       </SectionCard>
 
       <SectionCard title="训练数据集状态" subtitle="基于真实行情和可用因子构建训练样本；不训练模型、不生成预测、不生成回测。">

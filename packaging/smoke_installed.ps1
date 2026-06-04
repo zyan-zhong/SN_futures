@@ -80,6 +80,40 @@ function Wait-TerminalPort {
   throw "Timed out waiting for Terminal API on ports 8765-8769."
 }
 
+function Assert-PortReleased {
+  param([int]$Port, [int]$TimeoutSeconds = 20)
+  $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+  while ((Get-Date) -lt $deadline) {
+    try {
+      $client = New-Object System.Net.Sockets.TcpClient
+      $async = $client.BeginConnect("127.0.0.1", $Port, $null, $null)
+      $connected = $async.AsyncWaitHandle.WaitOne(300, $false)
+      if ($connected) {
+        $client.EndConnect($async)
+        $client.Close()
+        Start-Sleep -Milliseconds 300
+        continue
+      }
+      $client.Close()
+      Write-SmokeLog "PASS: port released: $Port"
+      return
+    } catch {
+      Write-SmokeLog "PASS: port released: $Port"
+      return
+    }
+  }
+  throw "Port was not released after shutdown: $Port"
+}
+
+function Assert-NoSNInsightOrphanProcess {
+  $remaining = @(Get-Process -Name "SNInsightTerminal" -ErrorAction SilentlyContinue)
+  if ($remaining.Count -gt 0) {
+    $ids = ($remaining | Select-Object -ExpandProperty Id) -join ","
+    throw "SNInsightTerminal orphan process remains: $ids"
+  }
+  Write-SmokeLog "PASS: no SNInsightTerminal orphan process remains"
+}
+
 function Assert-TextNotContains {
   param([string]$Text, [string[]]$Forbidden, [string]$Scope)
   foreach ($item in $Forbidden) {
@@ -116,9 +150,13 @@ Assert-True (Test-Path $StartMenuShortcut) "start menu shortcut exists"
 
 $process = Start-Process -FilePath $ExePath -ArgumentList "--no-browser" -PassThru -WindowStyle Hidden
 $port = 0
+$shutdownAttempted = $false
 try {
   $port = Wait-TerminalPort -Ports @(8765, 8766, 8767, 8768, 8769)
   Write-SmokeLog "detected service port: $port"
+  $processStatus = Invoke-SmokeRequest -Uri "http://127.0.0.1:$port/api/terminal/system/process-status" -TimeoutSec 10
+  Assert-True ([int]$processStatus.pid -eq [int]$process.Id) "process-status pid matches installed process"
+  Assert-True ([int]$processStatus.port -eq [int]$port) "process-status port matches detected port"
 
   try {
     Invoke-SmokeRequest -Uri "http://127.0.0.1:$port/api/terminal/system-health" -TimeoutSec 60 | Out-Null
@@ -139,10 +177,16 @@ try {
   if ($ExpectPrivateBundleKeys) {
     Assert-True ([bool]$settingsStatus.alpha_vantage_configured) "private bundle Alpha Vantage key is configured"
     Assert-True ([bool]$settingsStatus.newsapi_configured) "private bundle NewsAPI key is configured"
+    Assert-True ([bool]$settingsStatus.tushare_configured) "private bundle Tushare key is configured"
+    Assert-True (([string]$settingsStatus.tushare_masked).Length -gt 0) "private bundle Tushare key is masked"
     Assert-True ($settingsStatus.alpha_vantage_source -in @("private_bundle", "user_secrets", "env")) "Alpha Vantage source is private_bundle/user_secrets/env"
     Assert-True ($settingsStatus.newsapi_source -in @("private_bundle", "user_secrets", "env")) "NewsAPI source is private_bundle/user_secrets/env"
+    Assert-True ($settingsStatus.tushare_source -in @("private_bundle", "user_secrets", "env")) "Tushare source is private_bundle/user_secrets/env"
     $diagText = $keyDiagnostics | ConvertTo-Json -Depth 10
     Assert-True ($diagText -notlike "*SN_BUNDLE_*") "key diagnostics do not expose bundle env names with values"
+    Assert-True ([bool]$keyDiagnostics.tushare.configured) "key diagnostics mark Tushare configured"
+    Assert-True (([string]$keyDiagnostics.tushare.masked).Length -gt 0) "key diagnostics show Tushare masked value"
+    Write-SmokeLog "PASS: Tushare configured/masked only; API permission or quota is not an install failure"
     $newsTest = Invoke-SmokeRequest -Uri "http://127.0.0.1:$port/api/terminal/newsapi/test" -Method "POST" -Body @{}
     Assert-True ($newsTest.message_zh -notlike "*key_missing*") "NewsAPI test is not key_missing"
     Assert-True ($newsTest.message_zh -notlike "*未配置*") "NewsAPI test is not unconfigured"
@@ -204,6 +248,8 @@ try {
     $afterReset = Invoke-SmokeRequest -Uri "http://127.0.0.1:$port/api/terminal/settings/status"
     Assert-True ([bool]$afterReset.alpha_vantage_configured) "reset restores or retains Alpha Vantage private default"
     Assert-True ([bool]$afterReset.newsapi_configured) "reset restores or retains NewsAPI private default"
+    Assert-True ([bool]$afterReset.tushare_configured) "reset restores or retains Tushare private default"
+    Assert-True (([string]$afterReset.tushare_masked).Length -gt 0) "reset restores Tushare masked value"
   }
 
   $logText = ""
@@ -218,8 +264,40 @@ try {
     Assert-True ($LASTEXITCODE -eq 0) "runtime secret scan passed"
   }
 
+  Write-SmokeLog "Requesting backend shutdown via Terminal API."
+  $shutdownAttempted = $true
+  $shutdown = Invoke-SmokeRequest -Uri "http://127.0.0.1:$port/api/terminal/system/shutdown" -Method "POST" -Body @{ reason = "installed_smoke" } -TimeoutSec 10
+  Assert-True ($shutdown.http_shutdown_scheduled -eq $true) "shutdown API scheduled HTTP server shutdown"
+  Assert-True ($shutdown.accepting_new_tasks -eq $false) "shutdown API stopped new task acceptance"
+  Assert-PortReleased -Port $port -TimeoutSeconds 20
+  $processExitDeadline = (Get-Date).AddSeconds(20)
+  while (-not $process.HasExited -and (Get-Date) -lt $processExitDeadline) {
+    Start-Sleep -Milliseconds 300
+    $process.Refresh()
+  }
+  Assert-True ($process.HasExited) "installed process exited after shutdown API"
+  Assert-NoSNInsightOrphanProcess
+
   Write-SmokeLog "Installed smoke passed."
 } finally {
+  if ($port -gt 0 -and -not $shutdownAttempted) {
+    try {
+      Write-SmokeLog "Requesting backend shutdown via Terminal API."
+      $shutdownAttempted = $true
+      $shutdown = Invoke-SmokeRequest -Uri "http://127.0.0.1:$port/api/terminal/system/shutdown" -Method "POST" -Body @{ reason = "installed_smoke" } -TimeoutSec 10
+      Assert-True ($shutdown.http_shutdown_scheduled -eq $true) "shutdown API scheduled HTTP server shutdown"
+      Assert-True ($shutdown.accepting_new_tasks -eq $false) "shutdown API stopped new task acceptance"
+      Assert-PortReleased -Port $port -TimeoutSeconds 20
+      try {
+        Wait-Process -Id $process.Id -Timeout 20 -ErrorAction Stop
+        Write-SmokeLog "PASS: installed process exited after shutdown API"
+      } catch {
+        Write-SmokeLog "WARN: installed process did not exit after shutdown API before timeout. $($_.Exception.Message)"
+      }
+    } catch {
+      Write-SmokeLog "WARN: graceful shutdown validation failed. $($_.Exception.Message)"
+    }
+  }
   if ($process -and -not $process.HasExited) {
     Stop-Process -Id $process.Id -Force
   }

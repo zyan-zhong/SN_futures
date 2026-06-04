@@ -272,7 +272,7 @@ def _classify_article(article: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def refresh_news_data(force: bool = False) -> dict[str, Any]:
+def refresh_news_data(force: bool = False, provider: NewsApiProvider | None = None) -> dict[str, Any]:
     """Refresh NewsAPI articles when configured; otherwise record a skipped step."""
     _ = force
     events_dir = _events_dir()
@@ -280,7 +280,7 @@ def refresh_news_data(force: bool = False) -> dict[str, Any]:
     news_provider_status_path = events_dir / "news_provider_status.json"
     raw_path = events_dir / "news_raw.json"
     news_events_path = events_dir / "news_events.json"
-    provider = NewsApiProvider()
+    provider = provider or NewsApiProvider()
     result = provider.fetch_tin_news(page_size=50)
     if result.get("configured") is False or (not result.get("configured") and result.get("enabled") is False):
         status = result
@@ -633,14 +633,14 @@ def refresh_market_data(force: bool = False) -> dict[str, Any]:  # type: ignore[
 
 
 # Prompt 33 override: keep NewsAPI refresh observable and explainable.
-def refresh_news_data(force: bool = False) -> dict[str, Any]:  # type: ignore[override]
+def refresh_news_data(force: bool = False, provider: NewsApiProvider | None = None) -> dict[str, Any]:  # type: ignore[override]
     _ = force
     events_dir = _events_dir()
     provider_status_path = events_dir / "provider_status.json"
     news_provider_status_path = events_dir / "news_provider_status.json"
     raw_path = events_dir / "news_raw.json"
     news_events_path = events_dir / "news_events.json"
-    provider = NewsApiProvider()
+    provider = provider or NewsApiProvider()
     result = provider.fetch_tin_news(page_size=50)
     if result.get("configured") is False or (not result.get("configured") and result.get("enabled") is False):
         provider_payload = {"providers": [result], "updated_at": _now()}
@@ -660,6 +660,61 @@ def refresh_news_data(force: bool = False) -> dict[str, Any]:  # type: ignore[ov
 
     articles = result.get("articles") if isinstance(result.get("articles"), list) else []
     events = [_classify_article(row) for row in articles if isinstance(row, dict)]
+    cached_raw = _read_json(raw_path)
+    cached_news_events = _read_json(news_events_path)
+    cached_articles = cached_raw.get("articles") if isinstance(cached_raw, dict) and isinstance(cached_raw.get("articles"), list) else []
+    cached_events = cached_news_events.get("events") if isinstance(cached_news_events, dict) and isinstance(cached_news_events.get("events"), list) else []
+    if not result.get("success") and (cached_events or cached_articles):
+        cache_time = ""
+        if isinstance(cached_news_events, dict):
+            cache_time = str(cached_news_events.get("generated_at") or cached_news_events.get("updated_at") or "")
+        if not cache_time and isinstance(cached_raw, dict):
+            cache_time = str(cached_raw.get("generated_at") or cached_raw.get("updated_at") or "")
+        provider_payload = {"providers": [result], "updated_at": _now(), "from_cache": True}
+        _write_json(provider_status_path, provider_payload)
+        _write_json(news_provider_status_path, provider_payload)
+        try:
+            from .data_watermark_service import update_provider_watermark
+
+            update_provider_watermark(
+                "newsapi",
+                status="using_cache",
+                last_attempt_time=str(provider_payload["updated_at"]),
+                last_success_time=cache_time,
+                row_count=len(cached_events) or len(cached_articles),
+                from_cache=True,
+            )
+        except Exception:
+            pass
+        update_provider_status(
+            [
+                {
+                    "provider": "newsapi",
+                    "source_tier": "tier2",
+                    "success": False,
+                    "from_cache": True,
+                    "message": result.get("message", "") or result.get("message_zh", ""),
+                    "fetched_count": len(cached_articles),
+                    "inserted_count": len(cached_events),
+                    "updated_at": _now(),
+                }
+            ]
+        )
+        return {
+            "status": "using_cache",
+            "success": True,
+            "from_cache": True,
+            "message_zh": "NewsAPI 当前不可刷新，已保留最近成功新闻缓存；缓存不会冒充新数据。",
+            "output_files": [str(raw_path), str(news_events_path), str(provider_status_path), str(news_provider_status_path)],
+            "provider_attempts": result.get("query_attempts", []),
+            "status_code": result.get("error_code") or "request_failed",
+            "row_count": len(cached_events) or len(cached_articles),
+            "last_success_time": cache_time,
+            "cache_hit": True,
+            "error_type": result.get("error_code") or "request_failed",
+            "error_message_zh": result.get("error_message_zh") or result.get("message_zh") or result.get("message", ""),
+            "next_actions_zh": result.get("next_actions_zh") or ["等待 NewsAPI quota 冷却后重试", "继续使用最近成功新闻缓存"],
+        }
     _write_json(
         raw_path,
         {
@@ -674,6 +729,21 @@ def refresh_news_data(force: bool = False) -> dict[str, Any]:  # type: ignore[ov
     provider_payload = {"providers": [result], "updated_at": _now()}
     _write_json(provider_status_path, provider_payload)
     _write_json(news_provider_status_path, provider_payload)
+    if result.get("success"):
+        try:
+            from .data_watermark_service import update_provider_watermark
+
+            success_time = str(result.get("last_success_time") or provider_payload["updated_at"])
+            update_provider_watermark(
+                "newsapi",
+                status="success",
+                last_attempt_time=str(provider_payload["updated_at"]),
+                last_success_time=success_time,
+                row_count=len(articles),
+                from_cache=bool(result.get("from_cache")),
+            )
+        except Exception:
+            pass
     update_provider_status(
         [
             {

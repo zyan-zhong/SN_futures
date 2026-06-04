@@ -1,7 +1,7 @@
 import { useCallback, useState } from "react";
 import type { PageKey } from "../App";
-import { getForecastPath, refreshAll, refreshPredictions } from "../api/terminal";
-import type { ForecastPathPayload, PredictionCard as PredictionCardType, TerminalSnapshot } from "../api/types";
+import { getActiveAbsenceDiagnostics, getForecastPath, refreshAll, refreshPredictions } from "../api/terminal";
+import type { ActiveAbsenceDiagnosticsPayload, ForecastPathPayload, PredictionCard as PredictionCardType, TerminalSnapshot } from "../api/types";
 import { ForecastPathChart } from "../components/charts/ForecastPathChart";
 import { EmptyState } from "../components/common/EmptyState";
 import { ErrorBoundary } from "../components/common/ErrorBoundary";
@@ -46,7 +46,9 @@ export function PredictionPage({
   const [group, setGroup] = useState("all");
   const [taskMessage, setTaskMessage] = useState("");
   const forecastLoader = useCallback(() => getForecastPath(), []);
+  const activeAbsenceLoader = useCallback(() => getActiveAbsenceDiagnostics(), []);
   const { data: forecastPath, refresh: refreshForecastPath } = usePolling<ForecastPathPayload>(forecastLoader, 60000);
+  const { data: activeAbsence } = usePolling<ActiveAbsenceDiagnosticsPayload>(activeAbsenceLoader, 60000);
   const predictions = snapshot?.predictions || [];
   const hasActive = Boolean(snapshot?.model_health?.active_model);
   const visibleForecastPath = forecastPath?.sample_mode && !showSampleData ? { ...forecastPath, points: [] } : forecastPath;
@@ -88,6 +90,17 @@ export function PredictionPage({
           </p>
           {candidateReasons.length ? (
             <p>最近失败原因：{candidateReasons.slice(0, 4).join("；")}</p>
+          ) : null}
+          {!hasActive && activeAbsence?.root_causes?.length ? (
+            <div className="compact-stack" data-testid="active-absence-diagnostics">
+              <strong>Why no active model</strong>
+              {activeAbsence.root_causes.slice(0, 4).map((cause) => (
+                <span key={`${cause.category}-${cause.severity}`}>
+                  {cause.severity || "P1"} / {cause.category}: {cause.evidence}
+                </span>
+              ))}
+              <span>candidate_v6 plan: {activeAbsence.candidate_v6_plan?.status || "research_plan_only"}</span>
+            </div>
           ) : null}
         </div>
         <div className="button-row">

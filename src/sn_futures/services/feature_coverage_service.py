@@ -65,6 +65,8 @@ EXPECTED_FEATURES: dict[str, tuple[str, ...]] = {
     "inventory": (
         "shfe_inventory_delta_1w",
         "shfe_inventory_delta_4w",
+        "warehouse_receipt_delta_1w",
+        "member_net_position",
         "lme_inventory_delta_1w",
         "global_visible_inventory",
         "inventory_percentile_3y",
@@ -128,6 +130,7 @@ def _build_raw_frame(output_dir: Path) -> tuple[pd.DataFrame, list[str]]:
     rename_map = {
         "日期": "date",
         "时间": "time",
+        "trade_date": "date",
         "开盘": "open",
         "最高": "high",
         "最低": "low",
@@ -307,17 +310,57 @@ def _merge_fundamental_rows(frame: pd.DataFrame, rows: list[Mapping[str, Any]]) 
     if data.empty:
         return
     normalized_index = pd.Series(frame.index.normalize(), index=frame.index)
+    metadata_columns = {
+        "contract",
+        "ts_code",
+        "symbol",
+        "product",
+        "name",
+        "member_name",
+        "exchange",
+        "source",
+        "from_cache",
+        "quality_flag",
+    }
     for column in data.columns:
-        if column in {"trade_date", "date", "time"}:
+        if column in {"trade_date", "date", "time"} or column in metadata_columns:
             continue
         series = data[column]
         if series.dtype == object:
             numeric = pd.to_numeric(series, errors="coerce")
             if numeric.notna().any():
                 series = numeric
+            else:
+                continue
         by_day = series.copy()
         by_day.index = by_day.index.normalize()
-        frame[column] = normalized_index.map(lambda day: by_day.get(day, np.nan))
+        mapped = normalized_index.map(lambda day: by_day.get(day, np.nan))
+        if column in frame.columns:
+            existing = frame[column]
+            merged = existing.copy()
+            fill_mask = merged.isna() & mapped.notna()
+            if bool(fill_mask.any()):
+                merged.loc[fill_mask] = mapped.loc[fill_mask]
+            if merged.dropna().empty:
+                merged = mapped
+            frame.loc[:, column] = merged.to_numpy()
+        else:
+            frame.loc[:, column] = mapped.to_numpy()
+
+
+def _augment_tushare_derived_features(frame: pd.DataFrame) -> None:
+    if frame.empty:
+        return
+    if "warehouse_receipt" in frame.columns:
+        receipt = pd.to_numeric(frame["warehouse_receipt"], errors="coerce")
+        if receipt.notna().any():
+            frame["warehouse_receipt_delta_1w"] = receipt.diff(5)
+    if "long_position" in frame.columns or "short_position" in frame.columns:
+        long_position = pd.to_numeric(frame.get("long_position", pd.Series(np.nan, index=frame.index)), errors="coerce")
+        short_position = pd.to_numeric(frame.get("short_position", pd.Series(np.nan, index=frame.index)), errors="coerce")
+        net = long_position - short_position
+        if net.notna().any():
+            frame["member_net_position"] = net
 
 
 def _augment_fundamental_features(frame: pd.DataFrame, output_dir: Path) -> None:
@@ -331,10 +374,16 @@ def _augment_fundamental_features(frame: pd.DataFrame, output_dir: Path) -> None
         "sn_shfe_warehouse_receipts.json",
         "sn_exchange_daily.json",
         "sn_member_positions.json",
+        "sn_tushare_daily.json",
+        "sn_tushare_warehouse_receipt.json",
+        "sn_tushare_settlement.json",
+        "sn_tushare_holding.json",
+        "sn_tushare_contracts.json",
         "sn_lme_tin.json",
-        "managed_proxy_fundamentals.json",
+        "managed_fundamentals.json",
     ):
         _merge_fundamental_rows(frame, _rows_from_fundamental_payload(_read_json(fundamentals / filename)))
+    _augment_tushare_derived_features(frame)
 
 
 def _augment_cross_market_features(frame: pd.DataFrame, output_dir: Path) -> None:
@@ -443,8 +492,8 @@ def _write_coverage_report(payload: Mapping[str, Any], report_version: str | Non
         path.write_text(json.dumps(sanitize_for_json(dict(payload)), ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-def build_feature_coverage_report(report_version: str | None = None) -> dict[str, Any]:
-    output_dir = get_user_output_dir()
+def build_feature_coverage_report(report_version: str | None = None, output_dir: Path | None = None) -> dict[str, Any]:
+    output_dir = output_dir or get_user_output_dir()
     raw, warnings = _build_raw_frame(output_dir)
     if raw.empty:
         return sanitize_for_json(

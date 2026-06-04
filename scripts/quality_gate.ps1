@@ -122,7 +122,9 @@ function Assert-RequiredDocs {
     "docs\ARTIFACT_CENTER.md",
     "docs\CODEBASE_CLEANUP_AUDIT.md",
     "docs\CUSTOMER_RELEASE_REPORT_0.3.8_PRIVATE.md",
+    "docs\CUSTOMER_RELEASE_REPORT_0.4.0_PRIVATE.md",
     "docs\PRIVATE_RELEASE_NOTES.md",
+    "docs\PRIVATE_RELEASE_NOTES_0.4.0.md",
     "docs\PRODUCTION_RELEASE_GOVERNANCE.md",
     "docs\RELEASE_GUIDE.md"
   )
@@ -153,6 +155,8 @@ try {
 }
 
 Invoke-GateStep "runtime secret scan" { & (Join-Path $ProjectRoot "scripts\scan_runtime_secrets.ps1") -IncludeSourceTree -AllowPrivateBundleSeed }
+Invoke-GateStep "all terminal API smoke" { & (Join-Path $ProjectRoot "scripts\smoke_all_terminal_apis.ps1") }
+Invoke-GateStep "full system TXT report" { & (Join-Path $ProjectRoot "scripts\generate_full_system_report.ps1") }
 Assert-NoCustomerBaselineText
 Assert-NoActiveUnlessPromotionPass
 Assert-PrivateSeedNotStatic

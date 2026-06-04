@@ -13,10 +13,11 @@ from .refresh_service import get_refresh_history, get_refresh_status
 from .runtime_diagnostics_service import build_runtime_data_diagnostics
 from .settings_service import get_terminal_settings_status
 from .terminal_service import build_terminal_data_status
+from .provider_status_canonical_service import build_canonical_provider_status
 
 
 SENSITIVE_KEYS = ("key", "token", "secret", "password", "authorization", "apikey")
-SUPPORTED_PROVIDERS = {"market", "newsapi", "alpha_vantage", "alphavantage", "shfe_public", "akshare_news", "miit_policy"}
+SUPPORTED_PROVIDERS = {"market", "newsapi", "alpha_vantage", "alphavantage", "managed_proxy", "managed", "tushare", "shfe_public", "akshare_news", "miit_policy"}
 
 
 def _now() -> str:
@@ -93,6 +94,7 @@ def get_refresh_last_error() -> dict[str, Any]:
 def get_provider_status_detail() -> dict[str, Any]:
     data_status = build_terminal_data_status()
     refresh_status = get_refresh_status()
+    canonical = build_canonical_provider_status()
     market_chain = _read_json(get_user_data_root() / "outputs" / "market_provider_status.json") or {}
     news_status = _read_json(get_user_data_root() / "outputs" / "events" / "provider_status.json") or {}
     return sanitize_for_json(
@@ -101,8 +103,9 @@ def get_provider_status_detail() -> dict[str, Any]:
             "success": True,
             "data_status": data_status,
             "refresh_status": refresh_status,
+            "provider_status_canonical": canonical,
             "market_provider_status": market_chain,
-            "news_provider_status": news_status,
+            "news_provider_status": (canonical.get("providers", {}) or {}).get("newsapi", news_status) if isinstance(canonical, Mapping) else news_status,
             "message_zh": "数据源明细已汇总，所有敏感字段已脱敏。",
             "generated_at": _now(),
         }
@@ -146,9 +149,18 @@ def test_provider(provider: str) -> dict[str, Any]:
         from ..data_providers.newsapi_provider import test_newsapi_connection
 
         detail = test_newsapi_connection()
+    elif provider == "tushare":
+        from .tushare_futures_service import test_tushare_connection
+
+        detail = test_tushare_connection()
+    elif provider in {"managed_proxy", "managed"}:
+        from .managed_data_proxy_service import test_managed_proxy_connection
+
+        detail = test_managed_proxy_connection()
+        provider = "managed_proxy"
     else:
         detail = matched[0] if matched else {}
-    status_payload = detail if provider in {"alpha_vantage", "newsapi"} else (matched[0] if matched else detail)
+    status_payload = detail if provider in {"alpha_vantage", "newsapi", "tushare", "managed_proxy"} else (matched[0] if matched else detail)
     label = str(status_payload.get("freshness_label") or status_payload.get("status") or "")
     return sanitize_for_json(
         sanitize_mapping(

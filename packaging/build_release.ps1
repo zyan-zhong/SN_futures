@@ -5,11 +5,12 @@
   [string]$NpmPath = "",
   [switch]$SkipInstaller,
   [switch]$SkipSmoke,
-  [string]$Version = "0.3.8-private-research-beta.1",
+  [string]$Version = "0.4.3-private-research-beta.1",
   [switch]$CleanRelease,
   [switch]$PrivateBundleKeys,
   [string]$PrivateKeysFile = "packaging/private_release_keys.json",
-  [switch]$AllowEmbeddedProviderKeys
+  [switch]$AllowEmbeddedProviderKeys,
+  [switch]$RequireAllPrivateProviderKeys
 )
 
 $ErrorActionPreference = "Stop"
@@ -53,20 +54,56 @@ function Mask-Key {
 
 function Read-PrivateReleaseKeys {
   param([string]$Path)
-  $alpha = [string]($env:SN_BUNDLE_ALPHA_VANTAGE_KEY)
-  $news = [string]($env:SN_BUNDLE_NEWSAPI_KEY)
-  if (-not $alpha -or -not $news) {
-    $resolved = Join-Path $ProjectRoot $Path
-    if (Test-Path $resolved) {
-      $payload = Get-Content -LiteralPath $resolved -Raw | ConvertFrom-Json
-      if (-not $alpha) { $alpha = [string]$payload.SN_ALPHA_VANTAGE_KEY }
-      if (-not $news) { $news = [string]$payload.SN_NEWSAPI_KEY }
+  $fileKeys = @{}
+  $resolved = if ([System.IO.Path]::IsPathRooted($Path)) { $Path } else { Join-Path $ProjectRoot $Path }
+  if (Test-Path $resolved) {
+    $payload = Get-Content -LiteralPath $resolved -Raw | ConvertFrom-Json
+    $source = $payload
+    if ($payload.PSObject.Properties.Name -contains "secrets") {
+      $source = $payload.secrets
     }
+    foreach ($name in @("SN_ALPHA_VANTAGE_KEY", "SN_NEWSAPI_KEY", "SN_TUSHARE_TOKEN", "SN_MANAGED_PROXY_TOKEN", "SN_MANAGED_DATA_PROXY_TOKEN")) {
+      if ($source.PSObject.Properties.Name -contains $name) {
+        $fileKeys[$name] = [string]$source.$name
+      }
+    }
+  } else {
+    Write-Log "Private keys file not found: $Path" "WARN"
   }
-  if (-not $alpha -or -not $news) {
-    throw "PrivateBundleKeys 已启用，但发行方 Alpha Vantage 或 NewsAPI key 缺失。请设置 SN_BUNDLE_* 环境变量或提供 -PrivateKeysFile。"
+
+  $alpha = [string]($env:SN_BUNDLE_ALPHA_VANTAGE_KEY)
+  if (-not $alpha) { $alpha = [string]($env:SN_ALPHA_VANTAGE_KEY) }
+  if (-not $alpha) { $alpha = [string]$fileKeys["SN_ALPHA_VANTAGE_KEY"] }
+
+  $news = [string]($env:SN_BUNDLE_NEWSAPI_KEY)
+  if (-not $news) { $news = [string]($env:SN_NEWSAPI_KEY) }
+  if (-not $news) { $news = [string]$fileKeys["SN_NEWSAPI_KEY"] }
+
+  $tushare = [string]($env:SN_BUNDLE_TUSHARE_TOKEN)
+  if (-not $tushare) { $tushare = [string]($env:SN_TUSHARE_TOKEN) }
+  if (-not $tushare) { $tushare = [string]$fileKeys["SN_TUSHARE_TOKEN"] }
+
+  $managedProxy = [string]($env:SN_BUNDLE_MANAGED_PROXY_TOKEN)
+  if (-not $managedProxy) { $managedProxy = [string]($env:SN_MANAGED_PROXY_TOKEN) }
+  if (-not $managedProxy) { $managedProxy = [string]($env:SN_MANAGED_DATA_PROXY_TOKEN) }
+  if (-not $managedProxy) { $managedProxy = [string]$fileKeys["SN_MANAGED_PROXY_TOKEN"] }
+  if (-not $managedProxy) { $managedProxy = [string]$fileKeys["SN_MANAGED_DATA_PROXY_TOKEN"] }
+
+  $missingRequired = @()
+  if (-not $alpha) { $missingRequired += "Alpha Vantage" }
+  if (-not $news) { $missingRequired += "NewsAPI" }
+  if (-not $tushare) { $missingRequired += "Tushare" }
+  if ($missingRequired.Count -gt 0) {
+    $message = "PrivateBundleKeys 缺少 provider key: $($missingRequired -join ', ')。请设置 SN_BUNDLE_* 环境变量或提供 -PrivateKeysFile。"
+    if ($RequireAllPrivateProviderKeys) {
+      throw $message
+    }
+    Write-Log $message "WARN"
   }
-  return @{ alpha = $alpha.Trim(); news = $news.Trim() }
+  if (-not $managedProxy) {
+    Write-Log "Managed proxy token not embedded; managed proxy remains disabled unless configured by user." "WARN"
+  }
+  return @{ alpha = $alpha.Trim(); news = $news.Trim(); tushare = $tushare.Trim(); managedProxy = $managedProxy.Trim() }
 }
 
 function New-PrivateBundleSeed {
@@ -84,15 +121,28 @@ function New-PrivateBundleSeed {
     schema_version = 1
     source = "private_bundle"
     created_at = (Get-Date).ToString("s")
-    secrets = [ordered]@{
-      SN_ALPHA_VANTAGE_KEY = $keys.alpha
-      SN_NEWSAPI_KEY = $keys.news
-    }
+    secrets = [ordered]@{}
+  }
+  if ($keys.alpha) {
+    $payload.secrets["SN_ALPHA_VANTAGE_KEY"] = $keys.alpha
+  }
+  if ($keys.news) {
+    $payload.secrets["SN_NEWSAPI_KEY"] = $keys.news
+  }
+  if ($keys.tushare) {
+    $payload.secrets["SN_TUSHARE_TOKEN"] = $keys.tushare
+  }
+  if ($keys.managedProxy) {
+    $payload.secrets["SN_MANAGED_DATA_PROXY_TOKEN"] = $keys.managedProxy
   }
   $dir = Split-Path -Parent $PrivateBundleSeed
   New-Item -ItemType Directory -Force -Path $dir | Out-Null
   $payload | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $PrivateBundleSeed -Encoding UTF8
-  Write-Log "Private bundle keys enabled: Alpha Vantage configured ($(Mask-Key $keys.alpha)); NewsAPI configured ($(Mask-Key $keys.news))."
+  $alphaLog = if ($keys.alpha) { "Alpha Vantage configured ($(Mask-Key $keys.alpha))" } else { "Alpha Vantage missing" }
+  $newsLog = if ($keys.news) { "NewsAPI configured ($(Mask-Key $keys.news))" } else { "NewsAPI missing" }
+  $tushareLog = if ($keys.tushare) { "Tushare configured ($(Mask-Key $keys.tushare))" } else { "Tushare missing" }
+  $managedLog = if ($keys.managedProxy) { "Managed proxy configured ($(Mask-Key $keys.managedProxy))" } else { "Managed proxy not embedded" }
+  Write-Log "Private bundle keys enabled: $alphaLog; $newsLog; $tushareLog; $managedLog."
 }
 
 function Remove-PrivateBundleSeedSource {
@@ -230,10 +280,14 @@ function Assert-CleanDistForInstaller {
 }
 
 trap {
+  $failureMessage = $_.Exception.Message
+  if ($failureMessage) {
+    Write-Log "发行构建失败：$failureMessage" "ERROR"
+  }
   if ($PrivateBundleKeys -and (Test-Path $PrivateBundleSeed)) {
     Remove-Item -LiteralPath $PrivateBundleSeed -Force -ErrorAction SilentlyContinue
   }
-  throw
+  throw $failureMessage
 }
 
 Set-Content -Path $BuildLog -Value "" -Encoding UTF8

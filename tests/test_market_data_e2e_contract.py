@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sys
+import time
 from pathlib import Path
 
 sys.path.insert(0, "src")
@@ -17,39 +18,41 @@ def _history(count: int) -> list[dict[str, object]]:
 def test_refresh_market_endpoint_returns_final_status_and_history_contract(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(refresh_service, "_outputs_dir", lambda: tmp_path)
 
-    def fake_market(force: bool = False) -> dict[str, object]:
-        refresh_service._write_json(
-            tmp_path / "sn_market_history.json",
-            {"points": _history(80), "history": _history(80), "row_count": 80, "message_zh": "历史行情可用。"},
-        )
-        refresh_service._write_json(
-            tmp_path / "market_provider_status.json",
-            {
-                "final_status": "history_only_success",
-                "realtime_attempts": [{"provider_name": "sina_realtime", "success": False, "symbol_used": "nf_SN0"}],
-                "history_attempts": [{"provider_name": "akshare_futures_zh_daily_sina", "success": True, "rows": 80, "symbol_used": "SN0"}],
-                "shfe_attempts": [{"provider_name": "shfe_public", "success": False, "status_code": "auxiliary_unavailable"}],
-                "providers": [],
-                "blocking_reasons": ["实时行情不可用。"],
-                "next_actions_zh": ["查看 provider 诊断。"],
-            },
-        )
+    def fake_refresh_steps(*args: object, **kwargs: object) -> dict[str, object]:
         return {
             "status": "success",
-            "final_status": "history_only_success",
-            "message_zh": "历史行情可用，实时价暂缺。",
-            "output_files": [str(tmp_path / "sn_market_history.json")],
-            "history_rows": 80,
-            "provider_chain_status": [],
+            "steps": [
+                {
+                    "step_name": "market",
+                    "final_status": "history_only_success",
+                    "message_zh": "历史行情可用，实时价暂缺。",
+                    "output_files": [str(tmp_path / "sn_market_history.json")],
+                    "history_rows": 80,
+                    "provider_chain_status": [],
+                }
+            ],
         }
 
-    monkeypatch.setattr(refresh_service, "refresh_market_data", fake_market)
+    monkeypatch.setattr("sn_futures.api.terminal_api.run_institutional_refresh_steps", fake_refresh_steps)
 
     status, payload = handle_terminal_api("/api/terminal/refresh/market", "POST", body=json.dumps({"force": True}))
+    final = _wait_for_task(str(payload["task_id"]))
 
     assert status == 200
-    assert payload["steps"][0]["final_status"] == "history_only_success"
-    assert payload["steps"][0]["history_rows"] == 80
+    assert payload["kind"] == "refresh_market"
+    result = final.get("result", {})
+    assert result["steps"][0]["final_status"] == "history_only_success"
+    assert result["steps"][0]["history_rows"] == 80
+
+
+def _wait_for_task(task_id: str) -> dict[str, object]:
+    for _ in range(80):
+        _, payload = handle_terminal_api("/api/terminal/tasks/status", "GET", query={"id": [task_id]})
+        if payload.get("status") in {"success", "failed"}:
+            time.sleep(0.05)
+            return payload
+        time.sleep(0.025)
+    return {}
 
 
 def test_price_history_endpoint_reports_points_or_chinese_reason(monkeypatch, tmp_path: Path) -> None:

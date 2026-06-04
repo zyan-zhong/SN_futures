@@ -6,11 +6,38 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 
 SENSITIVE_KEY_HINTS = ("key", "token", "secret", "password", "authorization", "apikey", "api_key")
-SENSITIVE_ENV_NAMES = ("SN_ALPHA_VANTAGE_KEY", "SN_NEWSAPI_KEY", "SN_MANAGED_DATA_PROXY_TOKEN")
+SENSITIVE_ENV_NAMES = (
+    "SN_ALPHA_VANTAGE_KEY",
+    "SN_ALPHA_VANTAGE_API_KEY",
+    "SN_NEWSAPI_KEY",
+    "SN_MANAGED_DATA_PROXY_TOKEN",
+    "SN_TUSHARE_TOKEN",
+    "SN_TWELVEDATA_API_KEY",
+    "SN_FRED_API_KEY",
+)
+SAFE_SENSITIVE_METADATA_KEYS = {
+    "base_url_configured",
+    "enabled_configured",
+    "endpoint_configured",
+    "api_key_configured",
+    "api_key_masked",
+    "gitignore_secret_coverage",
+    "key_configured",
+    "key_masked",
+    "key_source",
+    "missing_provider_credentials",
+    "no_raw_token_in_artifacts",
+    "no_secret_echo_allowed",
+    "token_configured",
+    "token_masked",
+}
 SECRET_LIKE_RE = re.compile(
-    r"(?i)(apikey|apiKey|api_key|x-api-key|authorization|bearer|token|secret|password)(\s*[:=]\s*|%3D)[^&\s,;\"']+"
+    r"(?i)(apikey|apiKey|api_key|x-api-key|x-sn-license-token|authorization|bearer|token|secret|password)(\s*[:=]\s*|%3D)[^&\s,;\"']+"
 )
 BEARER_RE = re.compile(r"(?i)\bBearer\s+[A-Za-z0-9._\-]{8,}")
+PROVIDER_ECHOED_KEY_RE = re.compile(
+    r"(?i)(\bapi\s+key\s+(?:as|is|was detected as)\s+)([A-Za-z0-9._\-]{8,})"
+)
 
 
 def _apply_extra_secret_redaction(value: str, extra_secrets: Iterable[str] | None = None) -> str:
@@ -27,6 +54,7 @@ def sanitize_text(text: Any, extra_secrets: Iterable[str] | None = None) -> str:
     value = _apply_extra_secret_redaction(value, extra_secrets)
     for name in SENSITIVE_ENV_NAMES:
         value = re.sub(rf"(?i){re.escape(name)}\s*=\s*[^&\s,;\"']+", f"{name}=***", value)
+    value = PROVIDER_ECHOED_KEY_RE.sub(lambda match: f"{match.group(1)}***", value)
     value = BEARER_RE.sub("Bearer ***", value)
     value = SECRET_LIKE_RE.sub(lambda match: f"{match.group(1)}{match.group(2)}***", value)
     return value
@@ -54,7 +82,9 @@ def sanitize_mapping(obj: Any, extra_secrets: Iterable[str] | None = None) -> An
         cleaned: dict[str, Any] = {}
         for key, value in obj.items():
             lower = str(key).lower()
-            if any(hint in lower for hint in SENSITIVE_KEY_HINTS):
+            if lower in SAFE_SENSITIVE_METADATA_KEYS:
+                cleaned[str(key)] = sanitize_mapping(value, extra_secrets=extra_secrets)
+            elif any(hint in lower for hint in SENSITIVE_KEY_HINTS):
                 cleaned[str(key)] = "***" if value else ""
             elif "url" in lower:
                 cleaned[str(key)] = sanitize_url(value, extra_secrets=extra_secrets)

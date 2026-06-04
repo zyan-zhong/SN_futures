@@ -13,6 +13,7 @@ from .api_key_resolver import SECRET_KEYS, resolve_secret
 
 
 ALLOWED_SECRET_KEYS = SECRET_KEYS
+ALLOWED_CONFIG_KEYS = ("SN_MANAGED_DATA_PROXY_URL",)
 
 
 def _read_secrets() -> dict[str, Any]:
@@ -59,12 +60,16 @@ def get_terminal_settings_status() -> dict[str, Any]:
     alpha_resolved = resolve_secret("SN_ALPHA_VANTAGE_KEY")
     news_resolved = resolve_secret("SN_NEWSAPI_KEY")
     managed_resolved = resolve_secret("SN_MANAGED_DATA_PROXY_TOKEN")
+    tushare_resolved = resolve_secret("SN_TUSHARE_TOKEN")
     alpha = str(alpha_resolved.get("value") or "")
     news = str(news_resolved.get("value") or "")
     managed_token = str(managed_resolved.get("value") or "")
+    managed_endpoint = str(stored.get("SN_MANAGED_DATA_PROXY_URL") or os.environ.get("SN_MANAGED_DATA_PROXY_URL") or "")
+    tushare_token = str(tushare_resolved.get("value") or "")
     alpha_source = str(alpha_resolved.get("source") or "none")
     news_source = str(news_resolved.get("source") or "none")
     managed_source = str(managed_resolved.get("source") or "none")
+    tushare_source = str(tushare_resolved.get("source") or "none")
     host = os.environ.get("SN_TERMINAL_HOST", "127.0.0.1")
     port = os.environ.get("SN_TERMINAL_PORT", "8765")
     api_base_url = os.environ.get("SN_TERMINAL_API_BASE_URL") or f"http://{host}:{port}"
@@ -74,18 +79,25 @@ def get_terminal_settings_status() -> dict[str, Any]:
         "alpha_vantage_configured": bool(alpha),
         "newsapi_configured": bool(news),
         "managed_data_proxy_configured": bool(managed_token),
+        "managed_data_proxy_endpoint_configured": bool(managed_endpoint),
+        "tushare_configured": bool(tushare_token),
         "alpha_vantage_masked": mask_secret(alpha) if alpha else "",
         "newsapi_masked": mask_secret(news) if news else "",
         "managed_data_proxy_masked": mask_secret(managed_token) if managed_token else "",
+        "managed_data_proxy_endpoint": managed_endpoint,
+        "tushare_masked": mask_secret(tushare_token) if tushare_token else "",
         "alpha_vantage_source": alpha_source,
         "newsapi_source": news_source,
         "managed_data_proxy_source": managed_source,
+        "tushare_source": tushare_source,
         "alpha_vantage_source_label_zh": _provider_label(alpha_source),
         "newsapi_source_label_zh": _provider_label(news_source),
         "managed_data_proxy_source_label_zh": _provider_label(managed_source),
+        "tushare_source_label_zh": _provider_label(tushare_source),
         "alpha_vantage_ui_message_zh": _provider_message(alpha_source, bool(alpha)),
         "newsapi_ui_message_zh": _provider_message(news_source, bool(news)),
         "managed_data_proxy_ui_message_zh": _provider_message(managed_source, bool(managed_token)),
+        "tushare_ui_message_zh": _provider_message(tushare_source, bool(tushare_token)),
         "config_path": str(secrets_path().parent),
         "user_data_dir": str(user_root),
         "logs_dir": str(user_path("logs")),
@@ -116,7 +128,14 @@ def save_terminal_secrets(payload: Mapping[str, Any]) -> dict[str, Any]:
         value = _validate_secret(name, payload.get(name))
         if value is not None:
             updates[name] = value
-    if not updates:
+    config_updates: dict[str, str] = {}
+    for name in ALLOWED_CONFIG_KEYS:
+        if name not in payload:
+            continue
+        text = str(payload.get(name) or "").strip()
+        if text:
+            config_updates[name] = text
+    if not updates and not config_updates:
         return {
             **get_terminal_settings_status(),
             "success": False,
@@ -127,10 +146,13 @@ def save_terminal_secrets(payload: Mapping[str, Any]) -> dict[str, Any]:
     sources = {str(key): str(value) for key, value in sources.items()}
     for name in updates:
         sources[name] = "user_secrets"
+    for name in config_updates:
+        sources[name] = "user_secrets"
 
     merged = {
         **existing,
         **updates,
+        **config_updates,
         "_sources": sources,
         "updated_at": datetime.now().isoformat(timespec="seconds"),
     }
@@ -138,6 +160,8 @@ def save_terminal_secrets(payload: Mapping[str, Any]) -> dict[str, Any]:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(merged, ensure_ascii=False, indent=2), encoding="utf-8")
     for name, value in updates.items():
+        os.environ[name] = value
+    for name, value in config_updates.items():
         os.environ[name] = value
     return {**get_terminal_settings_status(), "success": True, "message_zh": "密钥已保存到本机用户目录。"}
 
@@ -179,6 +203,9 @@ def _validation_status(provider: str) -> str:
             code = "success"
     elif provider == "managed_proxy":
         code = "not_tested"
+    elif provider == "tushare":
+        item = _read_status_file(root / "outputs" / "fundamentals" / "tushare_provider_status.json")
+        code = str(item.get("status") or "")
     else:
         code = ""
     if not code:
@@ -214,8 +241,9 @@ def get_key_diagnostics() -> dict[str, Any]:
 
     return {
         "success": True,
-        "alpha_vantage": row("SN_ALPHA_VANTAGE_KEY", "alpha_vantage"),
-        "newsapi": row("SN_NEWSAPI_KEY", "newsapi"),
-        "managed_proxy": row("SN_MANAGED_DATA_PROXY_TOKEN", "managed_proxy"),
+            "alpha_vantage": row("SN_ALPHA_VANTAGE_KEY", "alpha_vantage"),
+            "newsapi": row("SN_NEWSAPI_KEY", "newsapi"),
+            "managed_proxy": row("SN_MANAGED_DATA_PROXY_TOKEN", "managed_proxy"),
+            "tushare": row("SN_TUSHARE_TOKEN", "tushare"),
         "message_zh": "key 诊断只返回来源和脱敏状态，不返回完整 key。",
     }

@@ -14,6 +14,13 @@ interface ErrorBoundaryState {
   errorInfo: ErrorInfo | null;
 }
 
+function summarizeSafeDetails(details: unknown): string {
+  if (!details || typeof details !== "object") return String(details ?? "empty");
+  return Object.entries(details as Record<string, unknown>)
+    .map(([key, value]) => `${key}: ${String(value ?? "").slice(0, 160)}`)
+    .join(" | ");
+}
+
 export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
   state: ErrorBoundaryState = { error: null, errorInfo: null };
 
@@ -57,10 +64,9 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
         </div>
         <details className="debug-panel">
           <summary>{COPY.debugTitle}</summary>
-          <pre>{JSON.stringify(safeDetails, null, 2)}</pre>
+          <code className="debug-summary">{summarizeSafeDetails(safeDetails)}</code>
         </details>
       </div>
     );
   }
 }
-

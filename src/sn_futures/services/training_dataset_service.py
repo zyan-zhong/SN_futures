@@ -209,7 +209,16 @@ def _build_training_dataset_from_feature_store(
     out = _output_dir()
     frame, feature_store_manifest = load_feature_store(feature_store_version)
     if frame.empty or "close" not in frame.columns:
-        feature_store_manifest = build_feature_store(feature_store_version)
+        if str(feature_store_version).lower() == "v7":
+            from .feature_store_v7_service import build_feature_store_v7
+
+            feature_store_manifest = build_feature_store_v7()
+        elif str(feature_store_version).lower() == "v5":
+            from .feature_store_v5_service import build_feature_store_v5
+
+            feature_store_manifest = build_feature_store_v5()
+        else:
+            feature_store_manifest = build_feature_store(feature_store_version)
         frame, feature_store_manifest = load_feature_store(feature_store_version)
     if frame.empty or "close" not in frame.columns:
         manifest = {
@@ -303,6 +312,7 @@ def _build_training_dataset_from_feature_store(
             "label_columns_removed_from_features": removed_label_cols,
         },
         "sample_data_used": False,
+        "mock_data_used": False,
         "baseline_used": False,
         "sample_count_by_horizon": sample_count_by_horizon,
         "feature_count": len(feature_cols),
@@ -338,7 +348,11 @@ def build_training_dataset(
     feature_store_version: str | None = None,
 ) -> dict[str, Any]:
     dataset_version = _normalise_version(dataset_version)
-    if feature_store_version or dataset_version in {"v3", "v4"}:
+    if dataset_version == "v10":
+        from .regime_balanced_dataset_service import build_training_dataset_v10
+
+        return build_training_dataset_v10(horizons=horizons, min_feature_coverage=min_feature_coverage)
+    if feature_store_version or dataset_version in {"v3", "v4", "v5", "v6", "v7"}:
         return _build_training_dataset_from_feature_store(
             horizons=horizons,
             min_feature_coverage=min_feature_coverage,
@@ -361,6 +375,7 @@ def build_training_dataset(
             "status": "failed",
             "message_zh": "未找到真实历史行情，未构建训练数据集。",
             "sample_data_used": False,
+            "mock_data_used": False,
             "baseline_used": False,
             "warnings": warnings,
         }
@@ -457,6 +472,7 @@ def build_training_dataset(
             "label_columns_removed_from_features": removed_label_cols,
         },
         "sample_data_used": False,
+        "mock_data_used": False,
         "baseline_used": False,
         "sample_count_by_horizon": sample_count_by_horizon,
         "feature_count": len(feature_cols),

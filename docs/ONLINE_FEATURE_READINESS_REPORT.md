@@ -89,3 +89,11 @@ Not recommended now:
 ## Boundary
 
 This readiness report is an input-quality and feature-availability audit. It does not publish active models and does not generate customer-facing predictions.
+
+## Tushare Private Token Update
+
+`SN_TUSHARE_TOKEN` may be resolved from user secrets, local private release keys, environment variables, or a development `.env`, in that order. Readiness reports must only expose `configured/source/masked` metadata. When real SN rows are available, Tushare can raise raw-market and inventory readiness through `open_interest`, `settlement`, `warehouse_receipt_delta_1w`, and `member_net_position`. If Tushare returns permission, quota, rate-limit, or no-SN-row states, readiness remains blocked with explicit reasons and no fabricated fields.
+
+## Tushare Auxiliary Readiness
+
+The online readiness view now distinguishes Tushare contract info, daily data, warehouse receipts, settlement parameters, and holding rankings. Each subinterface should show real status, row count, selected parameters, and last success time from the same provider status source. Failures remain visible as provider reasons and do not create fake factor readiness.

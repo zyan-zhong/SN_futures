@@ -1,19 +1,21 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { getBacktestDiagnostics, getResearchBacktestReport, runResearchBacktest } from "../api/terminal";
 import type { BacktestDiagnostics, ResearchBacktestHorizon, ResearchBacktestPayload } from "../api/types";
 import { BacktestPanel } from "../components/backtest/BacktestPanel";
 import { CostSensitivityPanel } from "../components/backtest/CostSensitivityPanel";
 import { InstitutionalValidationPanel } from "../components/backtest/InstitutionalValidationPanel";
 import { RegimePerformancePanel } from "../components/backtest/RegimePerformancePanel";
+import { DrawdownChart } from "../components/charts/DrawdownChart";
+import { EquityCurveChart } from "../components/charts/EquityCurveChart";
 import { DataTable } from "../components/common/DataTable";
 import { EmptyState } from "../components/common/EmptyState";
 import { ErrorBoundary } from "../components/common/ErrorBoundary";
 import { ErrorState } from "../components/common/ErrorState";
 import { LoadingState } from "../components/common/LoadingState";
-import { StatusPill } from "../components/common/StatusPill";
+import { TechnicalDetailsDrawer } from "../components/common/TechnicalDetailsDrawer";
 import { SectionCard } from "../components/layout/SectionCard";
 import { usePolling } from "../hooks/usePolling";
-import { formatNullable, formatNumber } from "../utils/format";
+import { formatNullable, formatNumber, toFiniteNumber } from "../utils/format";
 
 const horizons = [
   ["next_5m", "5分钟"],
@@ -25,13 +27,44 @@ const horizons = [
   ["one_to_three_months", "1-3个月"]
 ];
 
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+}
+
+function asArray<T = unknown>(value: unknown): T[] {
+  return Array.isArray(value) ? (value as T[]) : [];
+}
+
+function normalizeResearchBacktest(payload?: ResearchBacktestPayload | null): ResearchBacktestPayload | null {
+  const record = asRecord(payload);
+  if (!Object.keys(record).length) return null;
+
+  const normalizedHorizons = Object.fromEntries(
+    Object.entries(asRecord(record.horizons)).map(([horizon, value]) => {
+      const row = asRecord(value);
+      return [
+        horizon,
+        {
+          ...row,
+          metrics: asRecord(row.metrics)
+        } as ResearchBacktestHorizon
+      ];
+    })
+  );
+
+  return {
+    ...record,
+    horizons: normalizedHorizons
+  } as ResearchBacktestPayload;
+}
+
 function backtestRows(payload?: ResearchBacktestPayload | null) {
-  return Object.entries(payload?.horizons || {}).map(([horizon, value]) => {
-    const row = value as ResearchBacktestHorizon;
-    const metrics = row.metrics || {};
+  return Object.entries(asRecord(payload?.horizons)).map(([horizon, value]) => {
+    const row = asRecord(value) as ResearchBacktestHorizon;
+    const metrics = asRecord(row.metrics);
     return {
       horizon,
-      status: row.status,
+      status: formatNullable(row.status, "待验证"),
       trade_count: metrics.trade_count,
       total_return: metrics.total_return,
       max_drawdown: metrics.max_drawdown,
@@ -47,22 +80,63 @@ function backtestRows(payload?: ResearchBacktestPayload | null) {
   });
 }
 
+function curveRows(payload: ResearchBacktestPayload | null, key: "equity_curve" | "drawdown_curve") {
+  for (const value of Object.values(asRecord(payload?.horizons))) {
+    const rows = asArray<Record<string, unknown>>(asRecord(value)[key])
+      .map((item) => {
+        const point = asRecord(item);
+        const valueField = key === "equity_curve" ? point.value ?? point.equity : point.value ?? point.drawdown;
+        const number = toFiniteNumber(valueField);
+        if (number === null) return null;
+        return {
+          ts: formatNullable(point.ts ?? point.time, ""),
+          value: number
+        };
+      })
+      .filter((item): item is { ts: string; value: number } => item !== null);
+    if (rows.length) return rows;
+  }
+  return [];
+}
+
 export function BacktestPage() {
   const [horizon, setHorizon] = useState("tomorrow");
   const [researchVersion, setResearchVersion] = useState("v4");
   const [researchBacktest, setResearchBacktest] = useState<ResearchBacktestPayload | null>(null);
+  const [researchReportLoading, setResearchReportLoading] = useState(false);
   const [researchLoading, setResearchLoading] = useState(false);
   const [researchError, setResearchError] = useState<string | null>(null);
   const loader = useCallback(() => getBacktestDiagnostics(horizon), [horizon]);
   const { data, error, loading, refresh } = usePolling<BacktestDiagnostics>(loader, 60000);
+  const researchRows = useMemo(() => backtestRows(researchBacktest), [researchBacktest]);
+  const equityCurve = useMemo(() => curveRows(researchBacktest, "equity_curve"), [researchBacktest]);
+  const drawdownCurve = useMemo(() => curveRows(researchBacktest, "drawdown_curve"), [researchBacktest]);
+
+  const loadResearchBacktestReport = useCallback(async () => {
+    setResearchReportLoading(true);
+    setResearchError(null);
+    try {
+      const report = await getResearchBacktestReport(undefined, researchVersion);
+      setResearchBacktest(normalizeResearchBacktest(report));
+    } catch (err) {
+      setResearchBacktest(null);
+      setResearchError(err instanceof Error ? err.message : "研究回测报告暂时无法读取。");
+    } finally {
+      setResearchReportLoading(false);
+    }
+  }, [researchVersion]);
+
+  useEffect(() => {
+    void loadResearchBacktestReport();
+  }, [loadResearchBacktestReport]);
 
   async function handleRunResearchBacktest() {
     setResearchLoading(true);
     setResearchError(null);
     try {
-      const result = await runResearchBacktest({ candidate_version: researchVersion, horizons: ["1d", "3d", "5d", "10d", "20d"] });
+      await runResearchBacktest({ candidate_version: researchVersion, horizons: ["1d", "3d", "5d", "10d", "20d"] });
       const report = await getResearchBacktestReport(undefined, researchVersion);
-      setResearchBacktest({ ...result, markdown: report.markdown });
+      setResearchBacktest(normalizeResearchBacktest(report));
     } catch (err) {
       setResearchError(err instanceof Error ? err.message : "研究型回测暂时无法运行。");
     } finally {
@@ -120,6 +194,11 @@ export function BacktestPage() {
           <label>
             research backtest selector / version selector
             <select value={researchVersion} onChange={(event) => setResearchVersion(event.target.value)}>
+              <option value="v10">candidate_v10</option>
+              <option value="v9">candidate_v9</option>
+              <option value="v8">candidate_v8</option>
+              <option value="v7">candidate_v7</option>
+              <option value="v6">candidate_v6</option>
               <option value="v4">candidate_v4</option>
               <option value="v3">candidate_v3</option>
             </select>
@@ -129,11 +208,30 @@ export function BacktestPage() {
           <strong>研究边界</strong>
           <span>只用 OOF 信号，不用 in-sample prediction，不发布 active，不生成客户预测，不接 baseline。</span>
         </div>
+        {researchReportLoading ? <LoadingState label="正在读取研究回测报告..." /> : null}
         {researchLoading ? <LoadingState label="正在基于 OOF trace 生成研究回测..." /> : null}
         {researchError ? <ErrorState message={researchError} onRetry={handleRunResearchBacktest} /> : null}
-        {researchBacktest?.horizons ? (
+        {!researchReportLoading && !researchLoading && !researchError && !researchRows.length ? (
+          <>
+            <EmptyState
+              label="暂无研究回测数据"
+              description="当前 candidate 还没有可读取的 research backtest 报告；页面保持空状态，不会发布 active 或生成客户预测。"
+            />
+            <div className="two-column">
+              <EquityCurveChart data={[]} />
+              <DrawdownChart data={[]} />
+            </div>
+          </>
+        ) : null}
+        {researchRows.length ? (
+          <div className="two-column">
+            <EquityCurveChart data={equityCurve} />
+            <DrawdownChart data={drawdownCurve} />
+          </div>
+        ) : null}
+        {researchRows.length ? (
           <DataTable
-            data={backtestRows(researchBacktest)}
+            data={researchRows}
             columns={[
               { key: "horizon", title: "Horizon" },
               { key: "status", title: "状态" },
@@ -146,20 +244,20 @@ export function BacktestPage() {
               { key: "reality_check", title: "Reality Check", render: (row) => formatNullable(row.reality_check) },
             ]}
           />
-        ) : (
-          <EmptyState label={`${researchVersion} 暂无收益曲线；如果 candidate 未训练或 v4 readiness blocked，将保持空状态。`} />
-        )}
-        {researchBacktest?.horizons ? (
-          <DataTable
-            data={backtestRows(researchBacktest)}
-            columns={[
-              { key: "horizon", title: "Horizon" },
-              { key: "equity_curve_path", title: "Equity curve CSV", render: (row) => formatNullable(row.equity_curve_path) },
-              { key: "drawdown_curve_path", title: "Drawdown curve CSV", render: (row) => formatNullable(row.drawdown_curve_path) },
-              { key: "trades_path", title: "Trades CSV", render: (row) => formatNullable(row.trades_path) },
-              { key: "metrics_path", title: "Metrics JSON", render: (row) => formatNullable(row.metrics_path) },
-            ]}
-          />
+        ) : null}
+        {researchRows.length ? (
+          <TechnicalDetailsDrawer title="技术明细">
+            <DataTable
+              data={researchRows}
+              columns={[
+                { key: "horizon", title: "Horizon" },
+                { key: "equity_curve_path", title: "Equity curve CSV", render: (row) => formatNullable(row.equity_curve_path) },
+                { key: "drawdown_curve_path", title: "Drawdown curve CSV", render: (row) => formatNullable(row.drawdown_curve_path) },
+                { key: "trades_path", title: "Trades CSV", render: (row) => formatNullable(row.trades_path) },
+                { key: "metrics_path", title: "Metrics JSON", render: (row) => formatNullable(row.metrics_path) },
+              ]}
+            />
+          </TechnicalDetailsDrawer>
         ) : null}
         <div className="metric-grid compact">
           <div className="metric-card">

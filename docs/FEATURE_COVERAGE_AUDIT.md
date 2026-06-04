@@ -93,3 +93,24 @@
 - 当前公开在线源不能提供的字段，推荐通过发行方托管数据服务或正式供应商补齐。
 
 客户不需要上传 CSV/Excel。该报告不训练模型、不生成预测、不发布 active。
+
+# Tushare Private Token Coverage Update
+
+When `SN_TUSHARE_TOKEN` is configured through user secrets, local private release keys, environment, or development `.env`, the refresh path can populate SHFE tin fundamentals from Tushare. Real SN rows may improve:
+
+- `raw_market.open_interest`
+- `raw_market.settlement`
+- `inventory.warehouse_receipt_delta_1w`
+- `inventory.member_net_position`
+
+If the provider reports `token_missing`, `permission_denied`, `quota_insufficient`, `rate_limited`, or `no_sn_rows`, coverage remains unchanged and the report must keep explicit blocking reasons. No sample/mock/baseline fields are allowed to raise coverage.
+
+## Tushare Auxiliary Feature Store V6 Update
+
+Feature Store v6 records Tushare auxiliary coverage separately from OHLCV:
+
+- `warehouse_receipt_delta_1w` enters the warehouse/inventory group only when real SN warehouse rows are present.
+- `trading_fee`, `long_margin_rate`, `short_margin_rate`, and `offset_today_fee` enter the cost/risk group only from real `fut_settle` rows.
+- `member_net_position` enters the positioning/inventory view only from real `fut_holding` rows.
+
+The v6 manifest records `tushare_wsr_used`, `tushare_settle_used`, `tushare_holding_used`, `selected_params`, and `failed_subinterfaces`. Sparse Tushare rows only fill missing fundamental columns and must not overwrite primary OHLCV market history.

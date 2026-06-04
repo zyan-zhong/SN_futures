@@ -8,9 +8,12 @@ import { ErrorState } from "../common/ErrorState";
 import { LoadingState } from "../common/LoadingState";
 import { SectionCard } from "../layout/SectionCard";
 
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+}
+
 function rowsFromRecord(record?: Record<string, Record<string, unknown>>) {
-  if (!record) return [];
-  return Object.entries(record).map(([scenario, payload]) => ({ scenario, ...payload }));
+  return Object.entries(asRecord(record)).map(([scenario, payload]) => ({ scenario, ...asRecord(payload) }));
 }
 
 export function InstitutionalValidationPanel() {

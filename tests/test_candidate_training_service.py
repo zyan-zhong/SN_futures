@@ -4,6 +4,7 @@ import json
 import os
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -68,8 +69,10 @@ class CandidateTrainingServiceTest(unittest.TestCase):
                 body={"horizons": ["1d"]},
             )
             self.assertEqual(status, 200)
-            self.assertFalse(payload["candidate_is_active"])
-            self.assertIn("1d", payload["metrics_by_horizon"])
+            self.assertEqual(payload["kind"], "train_candidate")
+            self.assertIn("task_id", payload)
+            self.assertNotIn("candidate_is_active", payload)
+            self._wait_for_task(str(payload["task_id"]))
             status, wf = handle_terminal_api("/api/terminal/models/walk-forward-results", "GET")
             self.assertEqual(status, 200)
             self.assertIn("1d", wf["results"])
@@ -79,6 +82,14 @@ class CandidateTrainingServiceTest(unittest.TestCase):
             self.assertIn("/api/terminal/models/train-candidate", dumped)
             self.assertIn("/api/terminal/models/candidate-status", dumped)
             self.assertIn("/api/terminal/models/walk-forward-results", dumped)
+
+    def _wait_for_task(self, task_id: str) -> None:
+        for _ in range(80):
+            _, payload = handle_terminal_api("/api/terminal/tasks/status", "GET", query={"id": [task_id]})
+            if payload.get("status") in {"success", "failed"}:
+                time.sleep(0.1)
+                return
+            time.sleep(0.05)
 
 
 if __name__ == "__main__":

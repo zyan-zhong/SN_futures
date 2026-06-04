@@ -1,0 +1,26 @@
+{
+  "description": "Template only. Copy to config/managed_proxy.mapping.local.json for local ignored provider field aliases.",
+  "field_mapping": {
+    "provider_source_timestamp": "source_timestamp",
+    "provider_asof_date": "asof_date",
+    "provider_ingest_timestamp": "ingest_timestamp",
+    "provider_trading_date": "trading_date",
+    "provider_prediction_cutoff_date": "prediction_cutoff_date",
+    "provider_spot_price": "spot_price",
+    "provider_spot_premium": "spot_premium",
+    "provider_spot_futures_basis": "spot_futures_basis",
+    "provider_shfe_inventory": "shfe_inventory",
+    "provider_shfe_warehouse_receipt": "shfe_warehouse_receipt",
+    "provider_lme_tin_close": "lme_tin_close",
+    "provider_lme_inventory": "lme_inventory",
+    "provider_near_contract_close": "near_contract_close",
+    "provider_near_open_interest": "near_open_interest",
+    "provider_far_contract_close": "far_contract_close",
+    "provider_far_open_interest": "far_open_interest",
+    "provider_main_contract_switch_flag": "main_contract_switch_flag"
+  },
+  "notes": [
+    "Do not put tokens, Authorization headers, endpoint secrets, or raw credentials in this file.",
+    "Real local mappings belong only in config/managed_proxy.mapping.local.json."
+  ]
+}

@@ -19,6 +19,7 @@ from urllib.parse import parse_qs, unquote, urlparse
 from .api.terminal_api import handle_terminal_api
 from .config import ProjectPaths
 from .bootstrap.runtime_guard import runtime_status, write_runtime_state
+from .services.process_lifecycle_service import mark_server_shutdown, write_server_runtime_files
 from .market_data_hub import build_live_snapshot, persist_live_snapshot
 from .prediction_history import build_walk_forward_baseline_from_predictions
 from .runtime import resource_path
@@ -549,13 +550,26 @@ def start_scheduler_once() -> None:
 class V2ApiHandler(BaseHTTPRequestHandler):
     server_version = "SNInsightV2API/1.1"
 
+    @staticmethod
+    def _is_client_disconnect(exc: OSError) -> bool:
+        return isinstance(exc, (BrokenPipeError, ConnectionAbortedError, ConnectionResetError)) or getattr(
+            exc, "winerror", None
+        ) in {10053, 10054}
+
+    def _send_bytes(self, status: int, content_type: str, body: bytes) -> None:
+        try:
+            self.send_response(status)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        except OSError as exc:
+            if self._is_client_disconnect(exc):
+                return
+            raise
+
     def _send(self, status: int, payload: Any) -> None:
-        body = _json_bytes(payload)
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json; charset=utf-8")
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
+        self._send_bytes(status, "application/json; charset=utf-8", _json_bytes(payload))
 
     def _send_file(self, path: Path) -> None:
         if not path.exists() or not path.is_file():
@@ -564,27 +578,15 @@ class V2ApiHandler(BaseHTTPRequestHandler):
         body = path.read_bytes()
         mime = mimetypes.guess_type(str(path))[0] or "application/octet-stream"
         charset = "; charset=utf-8" if mime.startswith("text/") or mime in {"application/javascript", "application/json"} else ""
-        self.send_response(200)
-        self.send_header("Content-Type", mime + charset)
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
+        self._send_bytes(200, mime + charset, body)
 
     def _send_static_file(self, path: Path) -> None:
         body = path.read_bytes()
-        self.send_response(200)
-        self.send_header("Content-Type", _static_mime_type(path))
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
+        self._send_bytes(200, _static_mime_type(path), body)
 
     def _send_html(self, status: int, html: str) -> None:
         body = html.encode("utf-8")
-        self.send_response(status)
-        self.send_header("Content-Type", "text/html; charset=utf-8")
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
+        self._send_bytes(status, "text/html; charset=utf-8", body)
 
     def _send_terminal_static(self, request_path: str) -> None:
         root = _frontend_dist_root()
@@ -769,6 +771,8 @@ class V2ApiHandler(BaseHTTPRequestHandler):
             try:
                 status, payload = handle_terminal_api(parsed.path, "POST", query, raw)
                 self._send(status, payload)
+                if parsed.path == "/api/terminal/system/shutdown" and status == 200:
+                    threading.Thread(target=self.server.shutdown, name="sn-http-shutdown", daemon=True).start()
             except Exception as exc:
                 self._send(500, {"error": "internal_error", "message": str(exc)})
             return
@@ -835,6 +839,13 @@ def run_api_server(host: str = "127.0.0.1", port: int = 8765) -> None:
             port = 8765
     server = ThreadingHTTPServer((host, port), V2ApiHandler)
     write_runtime_state(api_port=port, frontend_port=port, message="本地 API 服务已启动")
+    write_server_runtime_files(host=host, port=port)
     if os.environ.get("SN_DISABLE_AUTO_SCHEDULER", "").lower() not in {"1", "true", "yes"}:
         start_scheduler_once()
-    server.serve_forever()
+    try:
+        server.serve_forever()
+    finally:
+        try:
+            server.server_close()
+        finally:
+            mark_server_shutdown(reason="server_exit")

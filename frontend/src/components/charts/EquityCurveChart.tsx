@@ -3,7 +3,9 @@ import { EmptyState } from "../common/EmptyState";
 import { ChartBox } from "./ChartBox";
 
 export function EquityCurveChart({ data }: { data?: Array<{ ts?: string; value?: number }> }) {
-  if (!data?.length) return <EmptyState label="暂无可用图表数据" />;
+  const rows = Array.isArray(data) ? data : [];
+  if (!rows.length) return <EmptyState label="暂无可用图表数据" />;
+  const research_only = true;
   return (
     <ChartBox
       minHeight={260}
@@ -11,9 +13,12 @@ export function EquityCurveChart({ data }: { data?: Array<{ ts?: string; value?:
       option={{
         backgroundColor: "transparent",
         tooltip: { trigger: "axis", valueFormatter: (value: unknown) => formatNumber(toFiniteNumber(value), 2) },
-        xAxis: { name: "时间", type: "category", data: data.map((item) => formatDateTime(item.ts, "")), axisLabel: { color: "#9fb1c9" }, nameTextStyle: { color: "#9fb1c9" } },
+        graphic: research_only
+          ? [{ type: "text", right: 18, top: 12, style: { text: "Research only", fill: "#8ea2bd", font: "600 12px sans-serif" } }]
+          : undefined,
+        xAxis: { name: "时间", type: "category", data: rows.map((item) => formatDateTime(item.ts, "")), axisLabel: { color: "#9fb1c9" }, nameTextStyle: { color: "#9fb1c9" } },
         yAxis: { name: "权益", type: "value", axisLabel: { color: "#9fb1c9" }, nameTextStyle: { color: "#9fb1c9" }, splitLine: { lineStyle: { color: "#1d2b3d" } } },
-        series: [{ name: "权益曲线", type: "line", smooth: true, data: data.map((item) => toFiniteNumber(item.value)), areaStyle: {} }]
+        series: [{ name: "权益曲线", type: "line", smooth: true, data: rows.map((item) => toFiniteNumber(item.value)), areaStyle: {} }]
       }}
     />
   );

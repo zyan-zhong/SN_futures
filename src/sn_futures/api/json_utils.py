@@ -11,10 +11,30 @@ from .schemas import schema_to_dict
 MISSING_TEXT = "数据暂缺"
 LOW_QUALITY_THRESHOLD = 0.55
 _SENSITIVE_KEY_FRAGMENTS = ("api_key", "apikey", "password", "passwd", "secret", "token", "credential")
+_SAFE_SENSITIVE_METADATA_SUFFIXES = (
+    "_configured",
+    "_masked",
+    "_source",
+    "_source_label_zh",
+    "_ui_message_zh",
+    "_status",
+)
+_SAFE_SENSITIVE_METADATA_KEYS = {
+    "credential_handoff_required",
+    "gitignore_secret_coverage",
+    "missing_provider_credentials",
+    "no_secret_echo_allowed",
+    "no_raw_token_in_artifacts",
+    "provider_credentials",
+}
 
 
 def _is_sensitive_key(key: Any) -> bool:
     text = str(key).lower()
+    if text in _SAFE_SENSITIVE_METADATA_KEYS:
+        return False
+    if any(text.endswith(suffix) for suffix in _SAFE_SENSITIVE_METADATA_SUFFIXES):
+        return False
     return any(fragment in text for fragment in _SENSITIVE_KEY_FRAGMENTS)
 
 
@@ -112,4 +132,3 @@ def clean_trade_points(payload: Any) -> Any:
         cleaned["take_profit"] = None
         cleaned["trade_point_note"] = "暂无交易点位"
     return cleaned
-

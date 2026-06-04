@@ -1,0 +1,64 @@
+from __future__ import annotations
+
+import json
+import os
+import tempfile
+import unittest
+from pathlib import Path
+from unittest.mock import patch
+
+import sys
+
+sys.path.insert(0, "src")
+
+from sn_futures.services.feature_store_v12_service import validate_v12_managed_readiness
+
+
+class ManagedProxyQuarantineContractV12GateTest(unittest.TestCase):
+    def test_research_cache_alone_never_unlocks_feature_store_v12(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {"SN_DATA_DIR": tmp}, clear=False):
+            out = Path(tmp) / "outputs"
+            diagnostics = out / "diagnostics"
+            research_cache = out / "managed_proxy_research_cache"
+            diagnostics.mkdir(parents=True, exist_ok=True)
+            research_cache.mkdir(parents=True, exist_ok=True)
+            cache_path = research_cache / "managed_proxy_research_cache_test.json"
+            cache_path.write_text(
+                json.dumps(
+                    {
+                        "research_cache": True,
+                        "production_eligible": False,
+                        "feature_store_v12_allowed": False,
+                        "row_count": 1,
+                        "rows": [{"spot_price": 205000}],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (diagnostics / "managed_proxy_quarantine_contract_report.json").write_text(
+                json.dumps(
+                    {
+                        "status": "ready",
+                        "research_cache_promotion_allowed": True,
+                        "research_cache_written": True,
+                        "research_cache_path": str(cache_path),
+                        "production_eligible": False,
+                        "feature_store_v12_allowed": False,
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            readiness = validate_v12_managed_readiness(managed_rows=[])
+
+        self.assertEqual(readiness["status"], "blocked")
+        self.assertFalse(readiness["v12_allowed"])
+        self.assertIn("research_cache_not_production_managed_data", readiness["blocking_reasons"])
+        self.assertFalse(readiness["managed_data_used"])
+        self.assertFalse(readiness["training_invoked"])
+        self.assertFalse(readiness["active_updated"])
+        self.assertFalse(readiness["customer_prediction_generated"])
+
+
+if __name__ == "__main__":
+    unittest.main()

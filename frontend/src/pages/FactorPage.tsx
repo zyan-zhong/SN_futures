@@ -1,11 +1,15 @@
 import { useCallback, useState } from "react";
-import { buildFeatureStore, getFactorDiagnostics, getFeatureCoverage, getFeatureStoreStatus, getOnlineFeatureReadiness } from "../api/terminal";
+import { buildFeatureStore, buildFeatureStoreV12, getCandidateV6Readiness, getFactorDiagnostics, getFeatureCoverage, getFeatureStoreStatus, getFeatureStoreV12, getFeatureStoreV12BuildPlan, getFeatureStoreV12ControlledBuild, getFeatureStoreV12InputContract, getOnlineFeatureReadiness, refreshFeatureStoreV12BuildPlan, refreshFeatureStoreV12InputContract, refreshManagedProxyV11, runFeatureStoreV12ControlledBuild } from "../api/terminal";
 import type {
+  CandidateV6ReadinessPayload,
   FactorDiagnosticFeature,
   FactorDiagnosticsPayload,
   FeatureCoverageFeature,
   FeatureCoveragePayload,
   FeatureStoreStatus,
+  FeatureStoreV12BuildPlanPayload,
+  FeatureStoreV12ControlledBuildPayload,
+  FeatureStoreV12InputContractPayload,
   OnlineFieldReadiness,
   OnlineFeatureReadinessPayload,
 } from "../api/types";
@@ -30,9 +34,21 @@ export function FactorPage({ showSampleData = true }: { showSampleData?: boolean
   const diagnosticsLoader = useCallback(() => getFactorDiagnostics(), []);
   const coverageLoader = useCallback(() => getFeatureCoverage(), []);
   const onlineReadinessLoader = useCallback(() => getOnlineFeatureReadiness(), []);
+  const candidateV6ReadinessLoader = useCallback(() => getCandidateV6Readiness(), []);
   const featureStoreLoader = useCallback(() => getFeatureStoreStatus("v3"), []);
   const featureStoreV4Loader = useCallback(() => getFeatureStoreStatus("v4"), []);
+  const featureStoreV5Loader = useCallback(() => getFeatureStoreStatus("v5"), []);
+  const featureStoreV6Loader = useCallback(() => getFeatureStoreStatus("v6"), []);
+  const featureStoreV7Loader = useCallback(() => getFeatureStoreStatus("v7"), []);
+  const featureStoreV10Loader = useCallback(() => getFeatureStoreStatus("v10"), []);
+  const featureStoreV11Loader = useCallback(() => getFeatureStoreStatus("v11"), []);
+  const featureStoreV12Loader = useCallback(() => getFeatureStoreV12(), []);
+  const featureStoreV12InputContractLoader = useCallback(() => getFeatureStoreV12InputContract(), []);
+  const featureStoreV12BuildPlanLoader = useCallback(() => getFeatureStoreV12BuildPlan(), []);
+  const featureStoreV12ControlledBuildLoader = useCallback(() => getFeatureStoreV12ControlledBuild(), []);
   const [featureStoreBuilding, setFeatureStoreBuilding] = useState(false);
+  const [featureStoreV12BuildPlanRefreshing, setFeatureStoreV12BuildPlanRefreshing] = useState(false);
+  const [featureStoreV12ControlledBuildRunning, setFeatureStoreV12ControlledBuildRunning] = useState(false);
   const [featureStoreActionError, setFeatureStoreActionError] = useState("");
   const { data, error, loading, refresh } = usePolling<FactorDiagnosticsPayload>(diagnosticsLoader, 60000);
   const {
@@ -48,6 +64,12 @@ export function FactorPage({ showSampleData = true }: { showSampleData?: boolean
     refresh: refreshOnlineReadiness,
   } = usePolling<OnlineFeatureReadinessPayload>(onlineReadinessLoader, 60000);
   const {
+    data: candidateV6Readiness,
+    error: candidateV6ReadinessError,
+    loading: candidateV6ReadinessLoading,
+    refresh: refreshCandidateV6Readiness,
+  } = usePolling<CandidateV6ReadinessPayload>(candidateV6ReadinessLoader, 60000);
+  const {
     data: featureStore,
     error: featureStoreError,
     loading: featureStoreLoading,
@@ -57,6 +79,42 @@ export function FactorPage({ showSampleData = true }: { showSampleData?: boolean
     data: featureStoreV4,
     refresh: refreshFeatureStoreV4,
   } = usePolling<FeatureStoreStatus>(featureStoreV4Loader, 60000);
+  const {
+    data: featureStoreV5,
+    refresh: refreshFeatureStoreV5,
+  } = usePolling<FeatureStoreStatus>(featureStoreV5Loader, 60000);
+  const {
+    data: featureStoreV6,
+    refresh: refreshFeatureStoreV6,
+  } = usePolling<FeatureStoreStatus>(featureStoreV6Loader, 60000);
+  const {
+    data: featureStoreV7,
+    refresh: refreshFeatureStoreV7,
+  } = usePolling<FeatureStoreStatus>(featureStoreV7Loader, 60000);
+  const {
+    data: featureStoreV10,
+    refresh: refreshFeatureStoreV10,
+  } = usePolling<FeatureStoreStatus>(featureStoreV10Loader, 60000);
+  const {
+    data: featureStoreV11,
+    refresh: refreshFeatureStoreV11,
+  } = usePolling<FeatureStoreStatus>(featureStoreV11Loader, 60000);
+  const {
+    data: featureStoreV12,
+    refresh: refreshFeatureStoreV12,
+  } = usePolling<FeatureStoreStatus>(featureStoreV12Loader, 60000);
+  const {
+    data: featureStoreV12InputContract,
+    refresh: refreshFeatureStoreV12InputContractStatus,
+  } = usePolling<FeatureStoreV12InputContractPayload>(featureStoreV12InputContractLoader, 60000);
+  const {
+    data: featureStoreV12BuildPlan,
+    refresh: refreshFeatureStoreV12BuildPlanStatus,
+  } = usePolling<FeatureStoreV12BuildPlanPayload>(featureStoreV12BuildPlanLoader, 60000);
+  const {
+    data: featureStoreV12ControlledBuild,
+    refresh: refreshFeatureStoreV12ControlledBuildStatus,
+  } = usePolling<FeatureStoreV12ControlledBuildPayload>(featureStoreV12ControlledBuildLoader, 60000);
   const groups = data?.sample_mode && !showSampleData ? [] : data?.groups || [];
   const coverageGroups = coverage?.groups || [];
   const usableCount = coverage?.usable_feature_cols?.length || 0;
@@ -67,11 +125,60 @@ export function FactorPage({ showSampleData = true }: { showSampleData?: boolean
     setFeatureStoreActionError("");
     try {
       await buildFeatureStore({ version: "v3" });
-      await Promise.all([refreshFeatureStore(), refreshFeatureStoreV4(), refreshCoverage(), refreshOnlineReadiness()]);
+      await buildFeatureStore({ version: "v5" });
+      await buildFeatureStore({ version: "v6" });
+      await buildFeatureStore({ version: "v7" });
+      await buildFeatureStore({ version: "v10" });
+      await buildFeatureStore({ version: "v11" });
+      await refreshFeatureStoreV12InputContract();
+      await refreshFeatureStoreV12BuildPlan();
+      await buildFeatureStoreV12();
+      await Promise.all([refreshFeatureStore(), refreshFeatureStoreV4(), refreshFeatureStoreV5(), refreshFeatureStoreV6(), refreshFeatureStoreV7(), refreshFeatureStoreV10(), refreshFeatureStoreV11(), refreshFeatureStoreV12(), refreshFeatureStoreV12InputContractStatus(), refreshFeatureStoreV12BuildPlanStatus(), refreshFeatureStoreV12ControlledBuildStatus(), refreshCoverage(), refreshOnlineReadiness(), refreshCandidateV6Readiness()]);
     } catch (err) {
       setFeatureStoreActionError(err instanceof Error ? err.message : "Feature Store v3 构建失败");
     } finally {
       setFeatureStoreBuilding(false);
+    }
+  };
+
+  const runManagedProxyV11 = async () => {
+    setFeatureStoreBuilding(true);
+    setFeatureStoreActionError("");
+    try {
+      await refreshManagedProxyV11({ force: true });
+      await refreshFeatureStoreV12InputContract();
+      await refreshFeatureStoreV12BuildPlan();
+      await Promise.all([refreshFeatureStoreV10(), refreshFeatureStoreV11(), refreshFeatureStoreV12(), refreshFeatureStoreV12InputContractStatus(), refreshFeatureStoreV12BuildPlanStatus(), refreshCoverage(), refreshOnlineReadiness()]);
+    } catch (err) {
+      setFeatureStoreActionError(err instanceof Error ? err.message : "managed proxy v11 refresh failed");
+    } finally {
+      setFeatureStoreBuilding(false);
+    }
+  };
+
+  const refreshV12BuildPlan = async () => {
+    setFeatureStoreV12BuildPlanRefreshing(true);
+    setFeatureStoreActionError("");
+    try {
+      await refreshFeatureStoreV12BuildPlan();
+      await refreshFeatureStoreV12BuildPlanStatus();
+    } catch (err) {
+      setFeatureStoreActionError(err instanceof Error ? err.message : "Feature Store v12 build dry-run plan refresh failed");
+    } finally {
+      setFeatureStoreV12BuildPlanRefreshing(false);
+    }
+  };
+
+  const runV12ControlledBuild = async () => {
+    setFeatureStoreV12ControlledBuildRunning(true);
+    setFeatureStoreActionError("");
+    try {
+      await runFeatureStoreV12ControlledBuild();
+      await Promise.all([refreshFeatureStoreV12ControlledBuildStatus(), refreshFeatureStoreV12(), refreshCoverage()]);
+    } catch (err) {
+      setFeatureStoreActionError(err instanceof Error ? err.message : "Feature Store v12 controlled build executor failed");
+    } finally {
+      setFeatureStoreV12ControlledBuildRunning(false);
     }
   };
 
@@ -121,13 +228,202 @@ export function FactorPage({ showSampleData = true }: { showSampleData?: boolean
             <strong>{featureStoreV4?.usable_fields?.length || 0}</strong>
             <small>{(featureStoreV4?.usable_fields || []).slice(0, 4).join(", ") || "blocked or empty"}</small>
           </div>
+          <div className="metric-card">
+            <span className="metric-label">Feature Store v5 status</span>
+            <strong>{featureStoreV5?.status || "not_ready"}</strong>
+            <small>{featureStoreV5?.message_zh || featureStoreV5?.manifest_path || "Tushare / managed proxy / Alpha / News inputs"}</small>
+          </div>
+          <div className="metric-card">
+            <span className="metric-label">v5 usable_fields</span>
+            <strong>{featureStoreV5?.usable_fields?.length || 0}</strong>
+            <small>{(featureStoreV5?.usable_fields || []).slice(0, 4).join(", ") || "not built"}</small>
+          </div>
+          <div className="metric-card">
+            <span className="metric-label">v5 source quality</span>
+            <strong>{featureStoreV5?.mock_data_used ? "mock_detected" : "real_or_missing"}</strong>
+            <small>{Object.keys(featureStoreV5?.source_quality || {}).slice(0, 4).join(", ") || "build v5 to inspect sources"}</small>
+          </div>
+          <div className="metric-card">
+            <span className="metric-label">Feature Store v6 status</span>
+            <strong>{featureStoreV6?.status || "not_ready"}</strong>
+            <small>{featureStoreV6?.message_zh || featureStoreV6?.manifest_path || "Tushare auxiliary interfaces"}</small>
+          </div>
+          <div className="metric-card">
+            <span className="metric-label">v6 auxiliary fields</span>
+            <strong>{["warehouse_receipt_delta_1w", "trading_fee", "long_margin_rate", "member_net_position"].filter((field) => featureStoreV6?.usable_fields?.includes(field)).length}</strong>
+            <small>{["warehouse_receipt_delta_1w", "trading_fee", "long_margin_rate", "member_net_position"].join(", ")}</small>
+          </div>
+          <div className="metric-card">
+            <span className="metric-label">failed_subinterfaces</span>
+            <strong>{featureStoreV6?.failed_subinterfaces?.length || 0}</strong>
+            <small>{(featureStoreV6?.failed_subinterfaces || []).map((item) => String(item.api_name || item.status || "unknown")).slice(0, 3).join(", ") || "none"}</small>
+          </div>
+          <div className="metric-card">
+            <span className="metric-label">Feature Store v7 status</span>
+            <strong>{featureStoreV7?.status || "not_ready"}</strong>
+            <small>{featureStoreV7?.manifest_path || "cost and positioning features"}</small>
+          </div>
+          <div className="metric-card">
+            <span className="metric-label">v7 cost features</span>
+            <strong>{featureStoreV7?.cost_features?.length || 0}</strong>
+            <small>{(featureStoreV7?.cost_features || []).slice(0, 4).join(", ") || "not built"}</small>
+          </div>
+          <div className="metric-card">
+            <span className="metric-label">v7 positioning features</span>
+            <strong>{featureStoreV7?.positioning_features?.length || 0}</strong>
+            <small>{(featureStoreV7?.positioning_features || []).slice(0, 4).join(", ") || "not built"}</small>
+          </div>
+          <div className="metric-card">
+            <span className="metric-label">v7 sparse policy</span>
+            <strong>{featureStoreV7?.sparse_feature_policy ? "configured" : "not_ready"}</strong>
+            <small>{(featureStoreV7?.sparse_features || []).slice(0, 4).join(", ") || "sparse holding policy"}</small>
+          </div>
+          <div className="metric-card">
+            <span className="metric-label">warehouse_missing_policy</span>
+            <strong>{featureStoreV7?.warehouse_missing_policy?.warehouse_receipt_available ? "real_warehouse_ready" : "missing_risk_flag"}</strong>
+            <small>{featureStoreV7?.warehouse_missing_policy?.reason || "inventory_missing_flag / warehouse_data_quality_score"}</small>
+          </div>
+          <div className="metric-card">
+            <span className="metric-label">Feature Store v10</span>
+            <strong>{featureStoreV10?.feature_store_v10_readiness?.status || featureStoreV10?.status || "not_ready"}</strong>
+            <small>managed fundamentals / no_fake_data: {featureStoreV10?.no_fake_data ? "true" : "pending"}</small>
+          </div>
+          <div className="metric-card">
+            <span className="metric-label">v10 managed fields</span>
+            <strong>{featureStoreV10?.managed_fundamental_fields?.length || 0}</strong>
+            <small>{(featureStoreV10?.managed_fundamental_fields || []).slice(0, 4).join(", ") || "shfe_warehouse_receipt / basis / LME pending"}</small>
+          </div>
+          <div className="metric-card">
+            <span className="metric-label">v10 missing fields</span>
+            <strong>{featureStoreV10?.missing_managed_fields?.length || 0}</strong>
+            <small>{(featureStoreV10?.missing_managed_fields || ["shfe_inventory", "spot_futures_basis", "lme_tin_close"]).slice(0, 4).join(", ")}</small>
+          </div>
+          <div className="metric-card">
+            <span className="metric-label">Feature Store v11</span>
+            <strong>{featureStoreV11?.feature_store_v11_readiness?.status || featureStoreV11?.status || "not_ready"}</strong>
+            <small>managed proxy minimal real loop / no_fake_data: {featureStoreV11?.no_fake_data ? "true" : "pending"}</small>
+          </div>
+          <div className="metric-card">
+            <span className="metric-label">v11 managed fields</span>
+            <strong>{featureStoreV11?.managed_fundamental_fields?.length || 0}</strong>
+            <small>{(featureStoreV11?.managed_fundamental_fields || []).slice(0, 4).join(", ") || "spot/basis/inventory/LME pending"}</small>
+          </div>
+          <div className="metric-card">
+            <span className="metric-label">v11 missing fields</span>
+            <strong>{featureStoreV11?.feature_store_v11_readiness?.missing_fields?.length || featureStoreV11?.missing_managed_fields?.length || 0}</strong>
+            <small>{(featureStoreV11?.feature_store_v11_readiness?.missing_fields || featureStoreV11?.missing_managed_fields || ["shfe_warehouse_receipt", "spot_futures_basis", "lme_tin_close"]).slice(0, 4).join(", ")}</small>
+          </div>
+          <div className="metric-card">
+            <span className="metric-label">Feature Store v12</span>
+            <strong>{featureStoreV12?.status || "not_ready"}</strong>
+            <small>blocked-first PIT managed build</small>
+          </div>
+          <div className="metric-card">
+            <span className="metric-label">health status</span>
+            <strong>{featureStoreV12?.health_status || "missing"}</strong>
+            <small>audit status: {featureStoreV12?.audit_status || "missing"}</small>
+          </div>
+          <div className="metric-card">
+            <span className="metric-label">managed field coverage</span>
+            <strong>{featureStoreV12?.managed_field_coverage?.label || "0/0"}</strong>
+            <small>{(featureStoreV12?.missing_fundamental_fields || []).slice(0, 4).join(", ") || "required fields complete"}</small>
+          </div>
+          <div className="metric-card">
+            <span className="metric-label">timestamp coverage</span>
+            <strong>{featureStoreV12?.timestamp_field_coverage?.label || "0/0"}</strong>
+            <small>{(featureStoreV12?.missing_timestamp_fields || []).slice(0, 4).join(", ") || "timestamp fields complete"}</small>
+          </div>
+          <div className="metric-card">
+            <span className="metric-label">PIT join</span>
+            <strong>{featureStoreV12?.point_in_time_join_ready ? "ready" : "blocked"}</strong>
+            <small>no-lookahead: {featureStoreV12?.no_lookahead_pass ? "pass" : "blocked"}</small>
+          </div>
+          <div className="metric-card">
+            <span className="metric-label">v12 Input Contract</span>
+            <strong>{featureStoreV12InputContract?.status || featureStoreV12?.v12_input_contract_status || "blocked"}</strong>
+            <small>input_contract_ready: {featureStoreV12InputContract?.input_contract_ready || featureStoreV12?.v12_input_contract_ready ? "true" : "false"}</small>
+          </div>
+          <div className="metric-card">
+            <span className="metric-label">missing_required_fields</span>
+            <strong>{featureStoreV12InputContract?.missing_required_fields?.length || 0}</strong>
+            <small>{(featureStoreV12InputContract?.missing_required_fields || []).slice(0, 4).join(", ") || "none"}</small>
+          </div>
+          <div className="metric-card">
+            <span className="metric-label">missing_timestamp_fields</span>
+            <strong>{featureStoreV12InputContract?.missing_timestamp_fields?.length || 0}</strong>
+            <small>{(featureStoreV12InputContract?.missing_timestamp_fields || []).slice(0, 4).join(", ") || "none"}</small>
+          </div>
+          <div className="metric-card">
+            <span className="metric-label">coverage diff</span>
+            <strong>{String(featureStoreV12InputContract?.coverage_diff?.row_count ?? 0)}</strong>
+            <small>feature_store_v12_build_allowed: {featureStoreV12InputContract?.feature_store_v12_build_allowed ? "true" : "false"}</small>
+          </div>
+          <div className="metric-card">
+            <span className="metric-label">v12 Build Dry-Run Plan</span>
+            <strong>{featureStoreV12BuildPlan?.status || "blocked"}</strong>
+            <small>feature_store_v12_build_executed: {featureStoreV12BuildPlan?.feature_store_v12_build_executed ? "true" : "false"}</small>
+          </div>
+          <div className="metric-card">
+            <span className="metric-label">expected_feature_store_path</span>
+            <strong>{featureStoreV12BuildPlan?.expected_row_count ?? 0}</strong>
+            <small>{featureStoreV12BuildPlan?.expected_feature_store_path || "not planned"}</small>
+          </div>
+          <div className="metric-card">
+            <span className="metric-label">expected_manifest_path</span>
+            <strong>{featureStoreV12BuildPlan?.expected_fields?.length || 0}</strong>
+            <small>{featureStoreV12BuildPlan?.expected_manifest_path || "not planned"}</small>
+          </div>
+          <div className="metric-card">
+            <span className="metric-label">resource_budget</span>
+            <strong>{String(featureStoreV12BuildPlan?.resource_budget?.max_runtime_seconds ?? 0)}s</strong>
+            <small>max rows {String(featureStoreV12BuildPlan?.resource_budget?.max_output_rows ?? 0)}</small>
+          </div>
+          <div className="metric-card">
+            <span className="metric-label">forbidden_side_effects</span>
+            <strong>{featureStoreV12BuildPlan?.forbidden_side_effects?.length || 0}</strong>
+            <small>{(featureStoreV12BuildPlan?.forbidden_side_effects || []).slice(0, 3).join(", ") || "build/train/active/prediction forbidden"}</small>
+          </div>
+          <div className="metric-card">
+            <span className="metric-label">v12 Controlled Build Executor</span>
+            <strong>{featureStoreV12ControlledBuild?.status || "blocked"}</strong>
+            <small>build_executed: {featureStoreV12ControlledBuild?.build_executed ? "true" : "false"}</small>
+          </div>
+          <div className="metric-card">
+            <span className="metric-label">feature_store_v12_path</span>
+            <strong>{featureStoreV12ControlledBuild?.row_count ?? 0}</strong>
+            <small>{featureStoreV12ControlledBuild?.feature_store_v12_path || "not executed"}</small>
+          </div>
+          <div className="metric-card">
+            <span className="metric-label">artifact_boundary_checks</span>
+            <strong>{featureStoreV12ControlledBuild?.artifact_boundary_checks?.status || "blocked"}</strong>
+            <small>{(featureStoreV12ControlledBuild?.blocking_reasons || ["does not trigger TD v12 or candidate"]).slice(0, 3).join(", ")}</small>
+          </div>
+          <div className="metric-card">
+            <span className="metric-label">training dataset v12</span>
+            <strong>{featureStoreV12?.training_dataset_v12_allowed ? "allowed" : "blocked"}</strong>
+            <small>{(featureStoreV12?.blocking_reasons || ["health/audit/fields gate not passed"]).slice(0, 3).join(", ")}</small>
+          </div>
+        </div>
+        <div className="notice-card">
+          <strong>沪锡仓单策略</strong>
+          <p>{featureStoreV7?.warehouse_missing_policy?.message_zh || "当前无真实沪锡仓单数据，系统未伪造字段；模型将使用缺失风险标记。"}</p>
+          <p>risk features: {(featureStoreV7?.warehouse_policy_features || ["inventory_missing_flag", "warehouse_data_quality_score"]).join(", ")}</p>
         </div>
         <div className="button-row">
           <button type="button" className="primary-button" onClick={buildStore} disabled={featureStoreBuilding}>
             {featureStoreBuilding ? "正在构建..." : "一键构建 Feature Store"}
           </button>
-          <button type="button" className="secondary-button" onClick={() => void Promise.all([refreshFeatureStore(), refreshFeatureStoreV4()])}>
+          <button type="button" className="secondary-button" onClick={() => void Promise.all([refreshFeatureStore(), refreshFeatureStoreV4(), refreshFeatureStoreV5(), refreshFeatureStoreV6(), refreshFeatureStoreV7()])}>
             刷新状态
+          </button>
+          <button type="button" className="secondary-button" onClick={runManagedProxyV11} disabled={featureStoreBuilding}>
+            刷新 managed proxy v11
+          </button>
+          <button type="button" className="secondary-button" onClick={refreshV12BuildPlan} disabled={featureStoreV12BuildPlanRefreshing}>
+            {featureStoreV12BuildPlanRefreshing ? "刷新 dry-run plan..." : "刷新 v12 build dry-run plan"}
+          </button>
+          <button type="button" className="secondary-button" onClick={runV12ControlledBuild} disabled={featureStoreV12ControlledBuildRunning}>
+            {featureStoreV12ControlledBuildRunning ? "运行 controlled executor..." : "运行 v12 controlled build"}
           </button>
           <span className="status-pill status-info">不生成预测</span>
         </div>
@@ -139,6 +435,51 @@ export function FactorPage({ showSampleData = true }: { showSampleData?: boolean
           <strong>字段来源</strong>
           <p>{Object.keys(featureStore?.field_sources || {}).slice(0, 12).join("、") || "构建后显示字段来源"}</p>
         </div>
+      </SectionCard>
+      <SectionCard
+        title="candidate_v6 数据准入"
+        subtitle="只检查真实字段覆盖、样例/模拟数据和 no-lookahead，不训练模型、不发布 active、不生成客户预测。"
+        actions={<button type="button" className="secondary-button" onClick={() => void refreshCandidateV6Readiness()}>刷新准入</button>}
+      >
+        {candidateV6ReadinessLoading ? (
+          <LoadingState label="正在检查 candidate_v6 数据准入..." />
+        ) : candidateV6ReadinessError ? (
+          <ErrorState title="candidate_v6 准入暂时无法加载" message={candidateV6ReadinessError} actionLabel="重新加载" onAction={refreshCandidateV6Readiness} />
+        ) : (
+          <div className="page-stack">
+            <div className="metric-grid compact">
+              <div className="metric-card">
+                <span className="metric-label">readiness</span>
+                <strong>{candidateV6Readiness?.status || "blocked"}</strong>
+                <small>{candidateV6Readiness?.ready ? "真实增量字段已达准入" : "等待真实增量字段达标"}</small>
+              </div>
+              <div className="metric-card">
+                <span className="metric-label">新增字段组</span>
+                <strong>{candidateV6Readiness?.new_factor_groups?.length || 0}</strong>
+                <small>{(candidateV6Readiness?.new_factor_groups || []).join("、") || "暂无"}</small>
+              </div>
+              <div className="metric-card">
+                <span className="metric-label">新增字段</span>
+                <strong>{candidateV6Readiness?.new_fields?.length || 0}</strong>
+                <small>{(candidateV6Readiness?.new_fields || []).slice(0, 5).join("、") || "暂无"}</small>
+              </div>
+              <div className="metric-card">
+                <span className="metric-label">no-lookahead</span>
+                <strong>{candidateV6Readiness?.no_lookahead_pass ? "pass" : "blocked"}</strong>
+                <small>{candidateV6Readiness?.feature_store_leakage_check_pass ? "feature leakage pass" : "等待 Feature Store v5"}</small>
+              </div>
+            </div>
+            <div className="notice-card">
+              <strong>缺失字段</strong>
+              <p>{(candidateV6Readiness?.missing_fields || []).slice(0, 20).join("、") || "暂无"}</p>
+              <strong>阻断原因</strong>
+              <p>{(candidateV6Readiness?.blocked_reasons || []).join("、") || "暂无"}</p>
+              <strong>下一步</strong>
+              <p>{(candidateV6Readiness?.next_actions_zh || []).join("；") || "刷新 Tushare / Managed Proxy 后重建 Feature Store v5。"}</p>
+              <span className="status-pill status-info">本接口不训练 candidate_v6</span>
+            </div>
+          </div>
+        )}
       </SectionCard>
       <SectionCard title="SHFE / 库存 / 仓单 / 基差覆盖率" subtitle="展示真实底层数据覆盖情况；不伪造库存、仓单、基差或现货价格。">
         <div className="factor-group-grid">
@@ -160,7 +501,38 @@ export function FactorPage({ showSampleData = true }: { showSampleData?: boolean
           </div>
         </div>
       </SectionCard>
-      <SectionCard title="自动在线因子准备度" subtitle="审计公开在线源、API key 源和托管源能否补齐机构级字段；客户不需要上传 CSV/Excel。">
+      <SectionCard title="Tushare 字段覆盖" subtitle="Tushare Pro 可补齐低成本期货基础数据；只有真实 SN 行会进入因子覆盖率。">
+        <div className="factor-group-grid">
+          <div className="factor-group">
+            <strong>open_interest</strong>
+            <span>来自 sn_tushare_daily.json，可改善 raw_market 和换月/持仓相关研究字段。</span>
+          </div>
+          <div className="factor-group">
+            <strong>warehouse_receipt</strong>
+            <span>来自 sn_tushare_warehouse_receipt.json，用于仓单变化覆盖；不等同于库存，不伪造 inventory。</span>
+          </div>
+          <div className="factor-group">
+            <strong>settlement</strong>
+            <span>来自 sn_tushare_settlement.json，用于结算价、保证金和手续费参数研究。</span>
+          </div>
+          <div className="factor-group">
+            <strong>holding</strong>
+            <span>来自 sn_tushare_holding.json，可生成 member_net_position 等持仓排名研究字段。</span>
+          </div>
+        </div>
+      </SectionCard>
+      <SectionCard title="managed 字段覆盖" subtitle="发行方托管数据服务可补齐公开源不稳定的现货、基差、库存、LME 和期限结构字段。">
+        <div className="reason-list">
+          <span>Feature Store v10 readiness: {featureStoreV10?.feature_store_v10_readiness?.status || "blocked"}.</span>
+          <span>Feature Store v11 readiness: {featureStoreV11?.feature_store_v11_readiness?.status || "blocked"}.</span>
+          <span>spot_futures_basis / spot_price / spot_premium：用于 basis 因子。</span>
+          <span>shfe_inventory / shfe_warehouse_receipt / lme_inventory：用于库存和仓单因子。</span>
+          <span>lme_tin_close：用于 LME tin return 和内外盘价差。</span>
+          <span>near_contract_close / far_contract_close / near_open_interest / far_open_interest：用于 term structure。</span>
+        </div>
+        <p className="muted">managed proxy 只接收结构化真实字段；无数据时显示排除原因，不生成 fake factor。no_fake_data.</p>
+      </SectionCard>
+      <SectionCard title="自动在线因子准备度" subtitle="客户不需要上传 CSV/Excel；系统审计在线源、API key 源和托管源能否补齐机构级字段。">
         {onlineReadinessLoading ? (
           <LoadingState label="正在审计自动在线字段可用性..." />
         ) : onlineReadinessError ? (
@@ -171,7 +543,7 @@ export function FactorPage({ showSampleData = true }: { showSampleData?: boolean
               <div className="metric-card">
                 <span className="metric-label">客户上传文件</span>
                 <strong>{onlineReadiness?.client_upload_required ? "需要" : "不需要"}</strong>
-                <small>客户不需要上传 CSV/Excel</small>
+                <small>无需手工上传文件</small>
               </div>
               <div className="metric-card">
                 <span className="metric-label">自动在线可用字段</span>

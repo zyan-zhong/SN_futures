@@ -83,3 +83,9 @@
 The v2 feature, training, candidate, OOF, institutional validation, and promotion dry-run pipeline must not serialize provider secrets into manifests, datasets, OOF traces, model registries, validation reports, logs, cache files, diagnostics bundles, or frontend assets.
 
 The v2 dataset manifest records only feature names and runtime data availability. It must not include `SN_ALPHA_VANTAGE_KEY`, `SN_NEWSAPI_KEY`, private bundle seed values, request headers, or raw provider URLs containing `apikey`.
+
+## Tushare Token Boundary
+
+`SN_TUSHARE_TOKEN` is covered by the same runtime secret boundary as other provider credentials. Source code, docs, tests, frontend bundles, logs, cache, outputs, diagnostics bundles, and release logs must not contain the complete token. The scanner treats `packaging/private_release_keys.json`, private bundle seeds, and user `config/secrets.json` as allowed private locations whose contents are not printed.
+
+Terminal APIs and frontend screens may show only `configured`, `source`, and `masked`. Provider error messages are sanitized before they are returned or written.

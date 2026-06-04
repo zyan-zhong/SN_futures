@@ -4,6 +4,7 @@ import json
 import os
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -52,6 +53,7 @@ class PrivateBundleNewsApiRefreshTest(unittest.TestCase):
             clear=False,
         ), patch("sn_futures.api_clients.RateLimitedCacheClient.fetch_json", side_effect=fake_fetch_json):
             status_code, result = handle_terminal_api("/api/terminal/refresh/news", "POST", body={"force": True})
+            self._wait_for_task(str(result["task_id"]))
             events_dir = Path(tmp) / "outputs" / "events"
             raw = json.loads((events_dir / "news_raw.json").read_text(encoding="utf-8"))
             filtered = json.loads((events_dir / "news_events_filtered.json").read_text(encoding="utf-8"))
@@ -61,7 +63,7 @@ class PrivateBundleNewsApiRefreshTest(unittest.TestCase):
 
         dumped = json.dumps({"result": result, "raw": raw, "filtered": filtered, "factor": factor_inputs, "provider": provider_status}, ensure_ascii=False)
         self.assertEqual(status_code, 200)
-        self.assertIn(result["status"], {"success", "failed"})
+        self.assertEqual(result["kind"], "refresh_news")
         self.assertTrue(captured_calls)
         first_call = captured_calls[0]
         self.assertIn("X-Api-Key", first_call["headers"])  # type: ignore[operator]
@@ -74,6 +76,15 @@ class PrivateBundleNewsApiRefreshTest(unittest.TestCase):
         self.assertGreaterEqual(relevance["rejected_count"], 1)
         self.assertTrue(provider_status["providers"][0]["configured"])
         self.assertNotIn("FAKE_NEWS_REFRESH_123456", dumped)
+
+    def _wait_for_task(self, task_id: str) -> dict[str, object]:
+        for _ in range(600):
+            _, payload = handle_terminal_api("/api/terminal/tasks/status", "GET", query={"id": [task_id]})
+            if payload.get("status") in {"success", "failed"}:
+                time.sleep(0.05)
+                return payload
+            time.sleep(0.05)
+        return {}
 
 
 if __name__ == "__main__":

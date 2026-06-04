@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 from collections import Counter
 from pathlib import Path
 from typing import Any
@@ -9,7 +10,7 @@ from typing import Any
 import pandas as pd
 
 from .config import ProjectPaths
-from .event_schema import EVENT_FEATURE_NAMES, max_window_hours, window_hours_for_horizon
+from .event_schema import EVENT_FEATURE_NAMES, max_window_hours, source_tier_weight, window_hours_for_horizon
 from .event_store import ingest_articles, load_events, load_provider_status, mark_event_usage, update_provider_status
 from .event_taxonomy import parse_time
 from .news_store import load_recent_articles
@@ -64,6 +65,24 @@ def _age_hours(event: dict[str, Any], prediction_time: pd.Timestamp) -> float | 
     if ts is None:
         return None
     return max(0.0, (prediction_time - ts).total_seconds() / 3600.0)
+
+
+def _apply_prediction_time_decay(events: list[dict[str, Any]], prediction_time: pd.Timestamp) -> list[dict[str, Any]]:
+    adjusted: list[dict[str, Any]] = []
+    for event in events:
+        row = dict(event)
+        age = _age_hours(row, prediction_time)
+        if age is None:
+            adjusted.append(row)
+            continue
+        decay = float(max(0.06, min(1.0, math.exp(-age / 168.0))))
+        source_conf = float(row.get("source_confidence") or source_tier_weight(str(row.get("source_tier") or "")))
+        impact = float(row.get("impact_score") or 0.0)
+        direction_confidence = max(float(row.get("direction_confidence") or 0.0), 0.18)
+        row["time_decay_weight"] = round(decay, 5)
+        row["final_event_weight"] = round(max(0.0, min(1.0, source_conf * impact * direction_confidence * decay)), 5)
+        adjusted.append(row)
+    return adjusted
 
 
 def _reject_reason(event: dict[str, Any], horizon: str, prediction_time: pd.Timestamp) -> str:
@@ -183,7 +202,7 @@ def build_event_evidence(
     else:
         prediction_ts = prediction_ts.tz_convert("Asia/Hong_Kong")
 
-    events = load_events(limit=limit)
+    events = _apply_prediction_time_decay(load_events(limit=limit), prediction_ts)
     recognized = [event for event in events if event.get("symbol_tags") or float(event.get("relevance_score") or 0.0) >= 0.18]
     used: list[dict[str, Any]] = []
     rejected: dict[str, str] = {}

@@ -2,7 +2,7 @@
 
 Current private research release target: `0.4.2-private-research-beta.2`
 
-This guide covers the Windows private installer build, installed smoke validation, private provider key handling, and release governance. The terminal is a research system. It does not connect to live trading, does not promise returns, and does not generate customer predictions unless a model has passed promotion gate and been explicitly approved as active.
+This guide covers the Windows installer build, installed smoke validation, local provider key handling, and release governance. The terminal is a research system. It does not connect to live trading, does not promise returns, and does not generate customer predictions unless a model has passed promotion gate and been explicitly approved as active.
 
 ## Prerequisites
 
@@ -11,9 +11,7 @@ This guide covers the Windows private installer build, installed smoke validatio
 - Node.js and npm. The default local paths are `C:\Program Files\nodejs\node.exe` and `C:\Program Files\nodejs\npm.cmd`.
 - PyInstaller.
 - Inno Setup 6 with `ISCC.exe` on PATH or installed in a standard location.
-- Private key file at `packaging/private_release_keys.json` or private build environment variables.
-
-`packaging/private_release_keys.json` is ignored by Git and must never be committed.
+- Provider keys are configured only on the user's local machine after install, through the settings page or `%LOCALAPPDATA%\SNInsightTerminal\config\secrets.json`.
 
 ## Quality Gate
 
@@ -25,52 +23,46 @@ Run the production quality gate before building:
 
 The gate executes:
 
-- `python -m compileall -q .`
+- repo cleanliness check
+- secret scan
+- release package safety scan
+- no sample/demo/baseline used as real result scan
+- no historical OHLCV live scaling scan
+- `python -m compileall -q src scripts tests`
+- API endpoint contract tests
+- data watermark schema tests
 - `pytest -q`
-- `python -m unittest discover -s tests -p "test*.py" -v`
 - `npm run typecheck`
 - `npm run build`
 - `npm run check:ui`
-- `npm run test:e2e`
-- `scripts/scan_runtime_secrets.ps1`
-- no customer-facing baseline or fake prediction text checks
-- no active model unless promotion evidence exists
-- private seed static exposure checks
-- release tree cleanliness checks
-- required governance document checks
+- optional `npm run test:e2e`
 
-## Private Build
+## Build
 
-Build the private install-ready package:
+Build the install-ready package:
 
 ```powershell
 .\packaging\build_release.ps1 `
-  -PrivateBundleKeys `
-  -PrivateKeysFile "packaging/private_release_keys.json" `
-  -AllowEmbeddedProviderKeys `
-  -RequireAllPrivateProviderKeys `
   -NodePath "C:\Program Files\nodejs\node.exe" `
   -NpmPath "C:\Program Files\nodejs\npm.cmd"
 ```
 
-The build always reads `packaging/private_release_keys.json` when `-PrivateBundleKeys` is enabled, then merges those values with environment variables. `-RequireAllPrivateProviderKeys` makes Alpha Vantage, NewsAPI, and Tushare mandatory before packaging; Managed Proxy is embedded only when configured.
-
-The build creates `build/private_bundle_seed.json` only long enough for PyInstaller to embed it in the private bundle, then removes the plaintext build-time seed file. The frontend bundle and release root must not contain the seed. Build logs may show only configured/masked provider status.
+`-PrivateBundleKeys`, `-AllowEmbeddedProviderKeys`, and `-RequireAllPrivateProviderKeys` are disabled. The build must not create or package `private_bundle_seed.json`, `private_release_keys.json`, `.env`, `secrets.json`, runtime cache, logs, outputs, or SQLite files.
 
 ## Installed Smoke
 
 Run installed smoke after the installer is created:
 
 ```powershell
-.\packaging\smoke_installed.ps1 -RunBrowserSmoke -ExpectPrivateBundleKeys
+.\packaging\smoke_installed.ps1 -RunBrowserSmoke
 ```
 
 The smoke validates:
 
 - installer success
 - first launch and API availability
-- private key import or existing user key detection
-- Tushare configured/masked when private bundle keys are expected
+- explicit unconfigured provider status on first launch
+- masked settings/key diagnostics when the local user configures keys
 - masked settings/key diagnostics
 - `/terminal` and `/legacy`
 - Playwright browser smoke when frontend dependencies exist
@@ -87,18 +79,18 @@ Expected release outputs:
 - `release/SHA256SUMS.txt`
 - optional `release/installed_smoke_report.txt`
 
-The release directory must not contain `.env`, `.log`, cache directories, database files, or raw private seed files.
+The release directory must not contain `.env`, `.env.local`, `secrets.json`, `private_bundle_seed.json`, `private_release_keys.json`, `.log`, cache directories, runtime outputs, database files, or screenshots.
 
 ## Security Boundary
 
-Private provider keys may exist only in:
+Provider keys may exist only in:
 
-- `packaging/private_release_keys.json` on the builder machine
-- PyInstaller internal private seed for the private build
-- `%LOCALAPPDATA%\SNInsightTerminal\config\secrets.json` after first launch import
+- `%LOCALAPPDATA%\SNInsightTerminal\config\secrets.json`
+- process environment variables for local developer runs
+- development `.env` for local development only, never for packaging
 
 Keys must not appear in source, docs, tests, frontend dist, logs, HTTP cache, diagnostics, release logs, or public GitHub releases.
 
 ## Public Release Warning
 
-Do not use `-PrivateBundleKeys` for public GitHub releases. The private bundle key path is intended only for controlled internal/private distribution. The long-term customer-safe approach remains managed data proxy or licensed provider tokens.
+Do not use embedded private provider keys for any release. GitHub releases should publish installer assets only; provider keys stay on the user's local machine.

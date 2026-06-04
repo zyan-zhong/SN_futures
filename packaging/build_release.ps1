@@ -44,111 +44,20 @@ function Test-Executable {
   }
 }
 
-function Mask-Key {
-  param([string]$Value)
-  if (-not $Value) { return "" }
-  $text = [string]$Value
-  if ($text.Length -le 8) { return "***" }
-  return "$($text.Substring(0,2))***$($text.Substring($text.Length - 2))"
-}
-
-function Read-PrivateReleaseKeys {
-  param([string]$Path)
-  $fileKeys = @{}
-  $resolved = if ([System.IO.Path]::IsPathRooted($Path)) { $Path } else { Join-Path $ProjectRoot $Path }
-  if (Test-Path $resolved) {
-    $payload = Get-Content -LiteralPath $resolved -Raw | ConvertFrom-Json
-    $source = $payload
-    if ($payload.PSObject.Properties.Name -contains "secrets") {
-      $source = $payload.secrets
-    }
-    foreach ($name in @("SN_ALPHA_VANTAGE_KEY", "SN_NEWSAPI_KEY", "SN_TUSHARE_TOKEN", "SN_MANAGED_PROXY_TOKEN", "SN_MANAGED_DATA_PROXY_TOKEN")) {
-      if ($source.PSObject.Properties.Name -contains $name) {
-        $fileKeys[$name] = [string]$source.$name
-      }
-    }
-  } else {
-    Write-Log "Private keys file not found: $Path" "WARN"
+function Assert-NoEmbeddedPrivateBundle {
+  if ($PrivateBundleKeys -or $AllowEmbeddedProviderKeys -or $RequireAllPrivateProviderKeys) {
+    throw "PrivateBundleKeys 已禁用：发行包不得嵌入 provider key。请在用户本机设置页或 %LOCALAPPDATA%\SNInsightTerminal\config\secrets.json 配置密钥。"
   }
-
-  $alpha = [string]($env:SN_BUNDLE_ALPHA_VANTAGE_KEY)
-  if (-not $alpha) { $alpha = [string]($env:SN_ALPHA_VANTAGE_KEY) }
-  if (-not $alpha) { $alpha = [string]$fileKeys["SN_ALPHA_VANTAGE_KEY"] }
-
-  $news = [string]($env:SN_BUNDLE_NEWSAPI_KEY)
-  if (-not $news) { $news = [string]($env:SN_NEWSAPI_KEY) }
-  if (-not $news) { $news = [string]$fileKeys["SN_NEWSAPI_KEY"] }
-
-  $tushare = [string]($env:SN_BUNDLE_TUSHARE_TOKEN)
-  if (-not $tushare) { $tushare = [string]($env:SN_TUSHARE_TOKEN) }
-  if (-not $tushare) { $tushare = [string]$fileKeys["SN_TUSHARE_TOKEN"] }
-
-  $managedProxy = [string]($env:SN_BUNDLE_MANAGED_PROXY_TOKEN)
-  if (-not $managedProxy) { $managedProxy = [string]($env:SN_MANAGED_PROXY_TOKEN) }
-  if (-not $managedProxy) { $managedProxy = [string]($env:SN_MANAGED_DATA_PROXY_TOKEN) }
-  if (-not $managedProxy) { $managedProxy = [string]$fileKeys["SN_MANAGED_PROXY_TOKEN"] }
-  if (-not $managedProxy) { $managedProxy = [string]$fileKeys["SN_MANAGED_DATA_PROXY_TOKEN"] }
-
-  $missingRequired = @()
-  if (-not $alpha) { $missingRequired += "Alpha Vantage" }
-  if (-not $news) { $missingRequired += "NewsAPI" }
-  if (-not $tushare) { $missingRequired += "Tushare" }
-  if ($missingRequired.Count -gt 0) {
-    $message = "PrivateBundleKeys 缺少 provider key: $($missingRequired -join ', ')。请设置 SN_BUNDLE_* 环境变量或提供 -PrivateKeysFile。"
-    if ($RequireAllPrivateProviderKeys) {
-      throw $message
-    }
-    Write-Log $message "WARN"
+  if (Test-Path $PrivateBundleSeed) {
+    Remove-Item -LiteralPath $PrivateBundleSeed -Force
+    Write-Log "已删除遗留 build/private_bundle_seed.json；发行包只允许从用户本机 config\secrets.json 读取密钥。" "WARN"
   }
-  if (-not $managedProxy) {
-    Write-Log "Managed proxy token not embedded; managed proxy remains disabled unless configured by user." "WARN"
-  }
-  return @{ alpha = $alpha.Trim(); news = $news.Trim(); tushare = $tushare.Trim(); managedProxy = $managedProxy.Trim() }
-}
-
-function New-PrivateBundleSeed {
-  if (-not $PrivateBundleKeys) {
-    if (Test-Path $PrivateBundleSeed) {
-      Remove-Item -LiteralPath $PrivateBundleSeed -Force
-    }
-    return
-  }
-  if (-not $AllowEmbeddedProviderKeys) {
-    throw "PrivateBundleKeys 需要显式传入 -AllowEmbeddedProviderKeys，确认这是私有/offline release bundle。"
-  }
-  $keys = Read-PrivateReleaseKeys -Path $PrivateKeysFile
-  $payload = [ordered]@{
-    schema_version = 1
-    source = "private_bundle"
-    created_at = (Get-Date).ToString("s")
-    secrets = [ordered]@{}
-  }
-  if ($keys.alpha) {
-    $payload.secrets["SN_ALPHA_VANTAGE_KEY"] = $keys.alpha
-  }
-  if ($keys.news) {
-    $payload.secrets["SN_NEWSAPI_KEY"] = $keys.news
-  }
-  if ($keys.tushare) {
-    $payload.secrets["SN_TUSHARE_TOKEN"] = $keys.tushare
-  }
-  if ($keys.managedProxy) {
-    $payload.secrets["SN_MANAGED_DATA_PROXY_TOKEN"] = $keys.managedProxy
-  }
-  $dir = Split-Path -Parent $PrivateBundleSeed
-  New-Item -ItemType Directory -Force -Path $dir | Out-Null
-  $payload | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $PrivateBundleSeed -Encoding UTF8
-  $alphaLog = if ($keys.alpha) { "Alpha Vantage configured ($(Mask-Key $keys.alpha))" } else { "Alpha Vantage missing" }
-  $newsLog = if ($keys.news) { "NewsAPI configured ($(Mask-Key $keys.news))" } else { "NewsAPI missing" }
-  $tushareLog = if ($keys.tushare) { "Tushare configured ($(Mask-Key $keys.tushare))" } else { "Tushare missing" }
-  $managedLog = if ($keys.managedProxy) { "Managed proxy configured ($(Mask-Key $keys.managedProxy))" } else { "Managed proxy not embedded" }
-  Write-Log "Private bundle keys enabled: $alphaLog; $newsLog; $tushareLog; $managedLog."
 }
 
 function Remove-PrivateBundleSeedSource {
   if (Test-Path $PrivateBundleSeed) {
     Remove-Item -LiteralPath $PrivateBundleSeed -Force
-    Write-Log "已删除 build/private_bundle_seed.json 明文源文件；仅保留 PyInstaller bundle 内部副本。"
+    Write-Log "已删除遗留 build/private_bundle_seed.json；发行包不得嵌入 private bundle seed。" "WARN"
   }
 }
 
@@ -252,7 +161,15 @@ function Invoke-PyInstaller {
 function Remove-RuntimeDataFromDist {
   $runtimeDirs = @(
     (Join-Path $DistDir "_internal\app_data"),
-    (Join-Path $DistDir "app_data")
+    (Join-Path $DistDir "_internal\outputs"),
+    (Join-Path $DistDir "_internal\cache"),
+    (Join-Path $DistDir "_internal\logs"),
+    (Join-Path $DistDir "_internal\private"),
+    (Join-Path $DistDir "app_data"),
+    (Join-Path $DistDir "outputs"),
+    (Join-Path $DistDir "cache"),
+    (Join-Path $DistDir "logs"),
+    (Join-Path $DistDir "private")
   )
   foreach ($path in $runtimeDirs) {
     if (Test-Path $path) {
@@ -268,9 +185,12 @@ function Assert-CleanDistForInstaller {
     $blocked += Get-ChildItem -LiteralPath $DistDir -Recurse -Force -File -ErrorAction SilentlyContinue |
       Where-Object {
         $_.Name -eq ".env" -or
+        $_.Name -eq ".env.local" -or
         $_.Name -eq "secrets.json" -or
-        $_.Extension -in @(".sqlite", ".db") -or
-        $_.FullName -match "\\app_data\\(data|cache|logs)\\"
+        $_.Name -eq "private_bundle_seed.json" -or
+        $_.Name -eq "private_release_keys.json" -or
+        $_.Extension -in @(".sqlite", ".sqlite3", ".db", ".log") -or
+        $_.FullName -match "\\(app_data|outputs|cache|logs|_sn_runtime|_sn_setup_runtime)\\"
       } |
       ForEach-Object { $_.FullName }
   }
@@ -284,7 +204,7 @@ trap {
   if ($failureMessage) {
     Write-Log "发行构建失败：$failureMessage" "ERROR"
   }
-  if ($PrivateBundleKeys -and (Test-Path $PrivateBundleSeed)) {
+  if (Test-Path $PrivateBundleSeed) {
     Remove-Item -LiteralPath $PrivateBundleSeed -Force -ErrorAction SilentlyContinue
   }
   throw $failureMessage
@@ -293,7 +213,7 @@ trap {
 Set-Content -Path $BuildLog -Value "" -Encoding UTF8
 Write-Log "SNInsightTerminal 发行构建开始，版本：$Version"
 Set-Location $ProjectRoot
-New-PrivateBundleSeed
+Assert-NoEmbeddedPrivateBundle
 
 if ($CleanRelease -and (Test-Path $ReleaseDir)) {
   Write-Log "CleanRelease 已启用，将清理 release 目录。" "WARN"

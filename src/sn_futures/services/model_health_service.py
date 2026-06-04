@@ -5,11 +5,12 @@ from typing import Any, Mapping
 
 from sn_futures.governance import ModelRegistry, build_model_health
 
+from ..runtime import get_user_output_dir
 from .payload_utils import fmt_num, fmt_pct, label, safe_float, sanitize_for_json
 
 
 def _registry(path: Path | None) -> ModelRegistry:
-    return ModelRegistry(path or Path("app_data/outputs/model_governance_registry.json"))
+    return ModelRegistry(path or get_user_output_dir() / "model_governance_registry.json")
 
 
 def _card_metrics(card: Mapping[str, Any]) -> dict[str, Any]:

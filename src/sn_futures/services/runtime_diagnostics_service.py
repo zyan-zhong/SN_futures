@@ -9,7 +9,7 @@ from typing import Any, Callable
 
 from ..api.json_utils import sanitize_for_json
 from ..config import load_environment_config
-from ..runtime import get_user_data_dir, get_user_output_dir
+from ..runtime import get_user_data_dir, get_user_output_dir, legacy_output_dir_diagnostics
 from ..user_data import initialize_user_data_dir, secrets_path, user_path
 
 
@@ -219,6 +219,7 @@ def build_runtime_data_diagnostics() -> dict[str, Any]:
     env = load_environment_config()
     user_data_dir = get_user_data_dir()
     output_dir = get_user_output_dir()
+    legacy_diagnostics = legacy_output_dir_diagnostics(output_dir)
     data_dir = user_path("data")
     report_dir = user_path("reports")
     cache_dir = user_path("cache")
@@ -250,6 +251,11 @@ def build_runtime_data_diagnostics() -> dict[str, Any]:
     payload = {
         "user_data_dir": str(user_data_dir),
         "output_dir": str(output_dir),
+        "current_runtime_root": legacy_diagnostics["current_runtime_root"],
+        "runtime_root": legacy_diagnostics["runtime_root"],
+        "ignored_legacy_dirs": legacy_diagnostics["ignored_legacy_dirs"],
+        "found_legacy_artifacts_count": legacy_diagnostics["found_legacy_artifacts_count"],
+        "recommendation_zh": legacy_diagnostics["recommendation_zh"],
         "report_dir": str(report_dir),
         "cache_dir": str(cache_dir),
         "config_dir": str(config_dir),

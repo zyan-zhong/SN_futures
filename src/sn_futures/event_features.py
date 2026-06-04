@@ -86,6 +86,13 @@ def _apply_prediction_time_decay(events: list[dict[str, Any]], prediction_time: 
 
 
 def _reject_reason(event: dict[str, Any], horizon: str, prediction_time: pd.Timestamp) -> str:
+    source_published = parse_time(event.get("source_published_at") or event.get("published_at"))
+    if source_published is None:
+        return "missing_source_published_at"
+    if source_published > prediction_time:
+        return "source_published_at_after_prediction_time"
+    if float(event.get("event_time_confidence") or 0.0) < 0.5:
+        return "low_event_time_confidence"
     available = parse_time(event.get("available_at"))
     if available is None:
         return "no_available_at"
@@ -119,6 +126,7 @@ def _event_public_view(event: dict[str, Any], *, used: bool, reason: str = "") -
         "source_tier": event.get("source_tier", ""),
         "raw_url": event.get("raw_url", ""),
         "canonical_url": event.get("canonical_url", ""),
+        "url_sanitized": event.get("url_sanitized") or event.get("canonical_url") or event.get("raw_url", ""),
         "final_open_url": event.get("final_open_url") or event.get("canonical_url") or event.get("raw_url", ""),
         "url": event.get("canonical_url") or event.get("raw_url", ""),
         "source_url": event.get("canonical_url") or event.get("raw_url", ""),
@@ -126,8 +134,13 @@ def _event_public_view(event: dict[str, Any], *, used: bool, reason: str = "") -
         "blocked_reason": event.get("blocked_reason", ""),
         "event_group_id": event.get("event_group_id", ""),
         "published_at": event.get("published_at", ""),
+        "source_published_at": event.get("source_published_at") or event.get("published_at", ""),
+        "fetched_at": event.get("fetched_at", ""),
         "available_at": event.get("available_at", ""),
+        "event_time_confidence": float(event.get("event_time_confidence") or 0.0),
+        "region": event.get("region", ""),
         "category": event.get("category", ""),
+        "language": event.get("language", ""),
         "event_type": event.get("event_type", ""),
         "direction_bias": event.get("direction_bias", "neutral"),
         "direction_contribution": event.get("direction_bias", "neutral"),
@@ -139,10 +152,13 @@ def _event_public_view(event: dict[str, Any], *, used: bool, reason: str = "") -
         "confidence_weight": float(event.get("final_event_weight") or 0.0),
         "model_weight": float(event.get("final_event_weight") or 0.0),
         "relevance_score": float(event.get("relevance_score") or 0.0),
+        "source_reliability_score": float(event.get("source_reliability_score") or event.get("source_confidence") or 0.0),
         "used_in_model": used,
         "included_in_model": used,
         "enters_model": used,
         "rejected_reason": reason,
+        "rejection_reason": reason,
+        "content_hash": event.get("content_hash", ""),
         "impact_level": "高" if impact >= 0.55 else ("中" if impact >= 0.30 else "低"),
         "entity_tags": event.get("entity_tags", []),
         "symbol_tags": event.get("symbol_tags", []),

@@ -11,8 +11,10 @@ sys.path.insert(0, "src")
 
 class EventAvailableAtTest(unittest.TestCase):
     def test_future_available_event_is_rejected(self) -> None:
+        old_data_env = os.environ.get("SN_DATA_DIR")
         old_env = os.environ.get("SN_INSIGHT_DATA_DIR")
         with tempfile.TemporaryDirectory() as tmp:
+            os.environ["SN_DATA_DIR"] = tmp
             os.environ["SN_INSIGHT_DATA_DIR"] = tmp
             from sn_futures.event_features import build_event_evidence
             from sn_futures.news_store import upsert_articles
@@ -37,11 +39,15 @@ class EventAvailableAtTest(unittest.TestCase):
                 output_dir=Path(tmp) / "outputs",
             )
             self.assertEqual(evidence["used_in_model_event_count"], 0)
-            self.assertEqual(evidence["rejected_reason_breakdown"].get("prediction_time_alignment_failed"), 1)
+            self.assertEqual(evidence["rejected_reason_breakdown"].get("source_published_at_after_prediction_time"), 1)
         if old_env is None:
             os.environ.pop("SN_INSIGHT_DATA_DIR", None)
         else:
             os.environ["SN_INSIGHT_DATA_DIR"] = old_env
+        if old_data_env is None:
+            os.environ.pop("SN_DATA_DIR", None)
+        else:
+            os.environ["SN_DATA_DIR"] = old_data_env
 
 
 if __name__ == "__main__":

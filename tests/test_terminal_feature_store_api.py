@@ -16,7 +16,7 @@ sys.path.insert(0, "src")
 from sn_futures.api.terminal_api import handle_terminal_api
 
 
-def _write_market(root: str, periods: int = 30) -> None:
+def _write_market(root: str, periods: int = 80) -> None:
     output = Path(root) / "outputs"
     output.mkdir(parents=True, exist_ok=True)
     rows = []

@@ -23,7 +23,12 @@ class EventFactorInputGateTest(unittest.TestCase):
                 json.dumps(
                     {
                         "events": [
-                            {"title": "LME tin inventory falls after Indonesia export quota delay", "description": "SHFE tin supply tightens"},
+                            {
+                                "title": "LME tin inventory falls after Indonesia export quota delay",
+                                "description": "SHFE tin supply tightens",
+                                "published_at": "2026-05-20T03:00:00Z",
+                                "fetched_at": "2026-05-20T03:05:00Z",
+                            },
                             {"title": "Macworld reviews a new Apple plugin", "description": "Software news"},
                         ]
                     },

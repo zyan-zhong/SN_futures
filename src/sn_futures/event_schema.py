@@ -4,6 +4,31 @@ from dataclasses import dataclass
 from typing import Any
 
 
+EVENT_RECORD_SCHEMA_VERSION = "event-record-v1"
+EVENT_RECORD_FIELDS: tuple[str, ...] = (
+    "event_id",
+    "title",
+    "summary",
+    "url_sanitized",
+    "source",
+    "provider",
+    "region",
+    "category",
+    "language",
+    "source_published_at",
+    "fetched_at",
+    "available_at",
+    "event_time_confidence",
+    "relevance_score",
+    "source_reliability_score",
+    "used_in_model",
+    "rejection_reason",
+    "content_hash",
+)
+EVENT_RECORD_REGIONS = ("China", "global")
+EVENT_RECORD_CATEGORIES = ("supply", "demand", "inventory", "macro", "exchange", "policy", "geopolitics", "irrelevant")
+
+
 HORIZON_EVENT_WINDOWS: dict[str, tuple[tuple[str, float], ...]] = {
     "next_5m": (("15m", 0.25), ("30m", 0.5), ("1h", 1.0), ("4h", 4.0)),
     "next_15m": (("1h", 1.0), ("4h", 4.0), ("1d", 24.0)),

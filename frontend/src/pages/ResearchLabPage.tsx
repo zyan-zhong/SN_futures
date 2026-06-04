@@ -1593,7 +1593,7 @@ export function ResearchLabPage() {
       >
         <div className="notice-card">
           <strong>Research boundary</strong>
-          <span>candidate_v4 does not write active_model.json, does not create customer-facing forecast output, and does not lower the promotion gate.</span>
+          <span>candidate_v4 does not write active_model.json, does not generate customer predictions, and does not lower the promotion gate. v1/v2/v3/v4 comparison remains research-only.</span>
         </div>
         <div className="metric-grid">
           <div className="metric-card">
@@ -1676,7 +1676,7 @@ export function ResearchLabPage() {
       <SectionCard
         title="人工审批 active 发布"
         subtitle="Only formal approval can request active artifact release after dry-run gates pass."
-        actions={<button className="secondary-button" type="button" disabled>Active artifact write unavailable</button>}
+        actions={<span className="secondary-button" aria-disabled="true">active publish unavailable</span>}
       >
         <div className="notice-card">
           <strong>风险声明</strong>

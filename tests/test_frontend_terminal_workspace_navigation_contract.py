@@ -54,8 +54,8 @@ class FrontendTerminalWorkspaceNavigationContractTest(unittest.TestCase):
             "required gates",
             "blocking reasons",
             "next_allowed_action",
-            "no active model confirmation",
-            "no customer prediction confirmation",
+            "无 active model 确认",
+            "无 customer prediction 确认",
         ]:
             self.assertIn(phrase, page)
 

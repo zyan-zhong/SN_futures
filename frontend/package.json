@@ -4,15 +4,15 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "C:\\Progra~1\\nodejs\\node.exe ./node_modules/vite/bin/vite.js --host 127.0.0.1 --port 5173",
-    "build": "C:\\Progra~1\\nodejs\\node.exe ./node_modules/typescript/bin/tsc -b && C:\\Progra~1\\nodejs\\node.exe ./node_modules/vite/bin/vite.js build",
-    "preview": "C:\\Progra~1\\nodejs\\node.exe ./node_modules/vite/bin/vite.js preview --host 127.0.0.1 --port 4173",
-    "typecheck": "C:\\Progra~1\\nodejs\\node.exe ./node_modules/typescript/bin/tsc -b",
-    "check": "C:\\Progra~1\\nodejs\\node.exe scripts/check-ui-contract.mjs",
-    "check:ui": "C:\\Progra~1\\nodejs\\node.exe scripts/check-ui-contract.mjs",
-    "test": "C:\\Progra~1\\nodejs\\node.exe ./node_modules/@playwright/test/cli.js test",
-    "test:e2e": "C:\\Progra~1\\nodejs\\node.exe ./node_modules/@playwright/test/cli.js test",
-    "test:e2e:headed": "C:\\Progra~1\\nodejs\\node.exe ./node_modules/@playwright/test/cli.js test --headed"
+    "dev": "vite --host 127.0.0.1 --port 5173",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview --host 127.0.0.1 --port 4173",
+    "typecheck": "tsc -b",
+    "check": "node scripts/check-ui-contract.mjs",
+    "check:ui": "node scripts/check-ui-contract.mjs",
+    "test": "playwright test",
+    "test:e2e": "playwright test",
+    "test:e2e:headed": "playwright test --headed"
   },
   "dependencies": {
     "@vitejs/plugin-react": "^5.0.0",

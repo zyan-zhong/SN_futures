@@ -175,6 +175,28 @@ export function TrainingDataPage() {
         </div>
       </SectionCard>
 
+      {version === "v7" ? (
+        <SectionCard title="v7 cost and positioning dataset" subtitle="institutional_tushare_cost_positioning">
+          <div className="metric-grid compact">
+            <div className="metric-card">
+              <span className="metric-label">cost_features</span>
+              <strong>{data?.cost_features?.length || 0}</strong>
+              <small>{(data?.cost_features || []).slice(0, 4).join(", ") || "not built"}</small>
+            </div>
+            <div className="metric-card">
+              <span className="metric-label">positioning_features</span>
+              <strong>{data?.positioning_features?.length || 0}</strong>
+              <small>{(data?.positioning_features || []).slice(0, 4).join(", ") || "not built"}</small>
+            </div>
+            <div className="metric-card">
+              <span className="metric-label">no_lookahead_pass</span>
+              <strong>{data?.no_lookahead_pass ? "pass" : "pending"}</strong>
+              <small>point-in-time join ready: {data?.point_in_time_join_ready ? "yes" : "no"}</small>
+            </div>
+          </div>
+        </SectionCard>
+      ) : null}
+
       {version === "v10" ? (
         <SectionCard title="v10 regime balance" subtitle="High-volatility samples are capped; low-volatility and range regimes receive higher training weight.">
           <div className="metric-grid compact">

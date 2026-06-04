@@ -670,7 +670,7 @@ export function GovernanceConsolePage() {
             <strong>{String(manualApproval?.customer_prediction_write_allowed ?? false)}</strong>
           </div>
         </div>
-        <p className="compact-note">Active artifact writes are not supported here.</p>
+        <p className="compact-note">active publish is not supported here; active artifact writes are blocked in this console.</p>
         <DataTable
           data={manualApprovalChecks}
           emptyLabel="No precondition checks loaded"

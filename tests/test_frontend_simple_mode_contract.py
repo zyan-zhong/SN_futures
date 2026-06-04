@@ -11,7 +11,14 @@ def test_app_defaults_to_simple_mode_and_can_switch_to_professional_mode() -> No
     assert "simple-nav" in sidebar
     assert "professional-nav" in sidebar
     assert 'data-testid="ui-mode-toggle"' in sidebar
-    for label in ["总览", "行情", "数据", "研究", "报告", "设置"]:
+    for label in [
+        "Terminal Overview",
+        "Prediction Workspace",
+        "Data Onboarding",
+        "Candidate Research",
+        "Governance Console",
+        "Settings",
+    ]:
         assert label in sidebar
 
 

@@ -76,7 +76,7 @@ class FrontendWorkspaceGuardAuditContractTest(unittest.TestCase):
         data_page = (FRONTEND / "pages" / "DataOnboardingPage.tsx").read_text(encoding="utf-8")
         archive = (FRONTEND / "pages" / "ResearchArchivePage.tsx").read_text(encoding="utf-8")
 
-        self.assertIn("Managed Proxy -> Production Cache -> v12 chain", data_page)
+        self.assertIn("Local API Provider -> verified local cache -> v12 chain", data_page)
         self.assertIn("Detailed data source cards", data_page)
         self.assertIn("<details", data_page)
         self.assertNotIn("<details open", data_page)

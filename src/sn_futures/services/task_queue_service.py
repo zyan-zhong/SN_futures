@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import sqlite3
 import threading
 import time
 import uuid
@@ -76,6 +77,39 @@ def _task_path(task_id: str) -> Path:
     return _tasks_dir() / f"{task_id}.json"
 
 
+def _tasks_db_path() -> Path:
+    return _tasks_dir() / "task_queue.sqlite"
+
+
+def _connect_tasks_db() -> sqlite3.Connection:
+    conn = sqlite3.connect(_tasks_db_path(), timeout=30)
+    conn.row_factory = sqlite3.Row
+    conn.execute(
+        """
+        create table if not exists tasks (
+            task_id text primary key,
+            kind text not null,
+            status text not null,
+            payload_json text not null default '{}',
+            result_json text not null default '{}',
+            error_message text not null default '',
+            created_at text not null,
+            started_at text not null default '',
+            finished_at text not null default '',
+            progress real not null default 0,
+            cancel_requested integer not null default 0,
+            lock_key text not null default '',
+            log_path text not null default '',
+            task_json text not null default '{}',
+            updated_at text not null
+        )
+        """
+    )
+    conn.execute("create index if not exists idx_tasks_recent on tasks(created_at desc, task_id desc)")
+    conn.execute("create index if not exists idx_tasks_kind_status on tasks(kind, status)")
+    return conn
+
+
 def _clean(payload: Any) -> Any:
     return sanitize_for_json(sanitize_mapping(payload))
 
@@ -91,6 +125,7 @@ def _task_fingerprint(kind: str, payload: dict[str, Any]) -> str:
 
 def _write_task(task: dict[str, Any]) -> dict[str, Any]:
     task = _clean(task)
+    _write_task_sqlite(task)
     path = _task_path(str(task["task_id"]))
     tmp_path = path.with_name(f"{path.name}.{uuid.uuid4().hex}.tmp")
     try:
@@ -113,6 +148,112 @@ def _write_task(task: dict[str, Any]) -> dict[str, Any]:
     return task
 
 
+def _json_text(value: Any) -> str:
+    return json.dumps(_clean(value or {}), ensure_ascii=False, sort_keys=True, default=str)
+
+
+def _write_task_sqlite(task: dict[str, Any]) -> None:
+    task_id = str(task.get("task_id") or "")
+    if not task_id:
+        return
+    now = _now()
+    with _connect_tasks_db() as conn:
+        existing = conn.execute("select status, cancel_requested from tasks where task_id = ?", (task_id,)).fetchone()
+        existing_cancel_requested = bool(existing["cancel_requested"]) if existing is not None else False
+        cancel_requested = existing_cancel_requested or bool(task.get("cancel_requested")) or str(task.get("status") or "") == "cancel_requested"
+        status = str(task.get("status") or "")
+        if existing_cancel_requested and status in {"queued", "running"}:
+            status = "cancel_requested"
+        payload = {
+            "task_id": task_id,
+            "kind": str(task.get("kind") or ""),
+            "status": status,
+            "payload_json": _json_text(task.get("payload") if isinstance(task.get("payload"), dict) else {}),
+            "result_json": _json_text(task.get("result") if isinstance(task.get("result"), dict) else {}),
+            "error_message": sanitize_text(task.get("error_message_zh") or task.get("error_message") or task.get("error") or ""),
+            "created_at": str(task.get("created_at") or now),
+            "started_at": str(task.get("started_at") or ""),
+            "finished_at": str(task.get("finished_at") or ""),
+            "progress": float(task.get("progress") or 0),
+            "cancel_requested": 1 if cancel_requested else 0,
+            "lock_key": str(task.get("lock_key") or task.get("kind") or ""),
+            "log_path": str(task.get("log_path") or ""),
+            "task_json": _json_text({**task, "status": status, "cancel_requested": cancel_requested}),
+            "updated_at": now,
+        }
+        conn.execute(
+            """
+            insert into tasks (
+                task_id, kind, status, payload_json, result_json, error_message,
+                created_at, started_at, finished_at, progress, cancel_requested,
+                lock_key, log_path, task_json, updated_at
+            ) values (
+                :task_id, :kind, :status, :payload_json, :result_json, :error_message,
+                :created_at, :started_at, :finished_at, :progress, :cancel_requested,
+                :lock_key, :log_path, :task_json, :updated_at
+            )
+            on conflict(task_id) do update set
+                kind = excluded.kind,
+                status = excluded.status,
+                payload_json = excluded.payload_json,
+                result_json = excluded.result_json,
+                error_message = excluded.error_message,
+                created_at = excluded.created_at,
+                started_at = excluded.started_at,
+                finished_at = excluded.finished_at,
+                progress = excluded.progress,
+                cancel_requested = max(tasks.cancel_requested, excluded.cancel_requested),
+                lock_key = excluded.lock_key,
+                log_path = excluded.log_path,
+                task_json = excluded.task_json,
+                updated_at = excluded.updated_at
+            """,
+            payload,
+        )
+
+
+def _task_from_sqlite_row(row: sqlite3.Row | None) -> dict[str, Any]:
+    if row is None:
+        return {}
+    try:
+        payload = json.loads(str(row["task_json"] or "{}"))
+    except Exception:
+        payload = {}
+    if not isinstance(payload, dict):
+        payload = {}
+    payload.setdefault("task_id", row["task_id"])
+    payload.setdefault("kind", row["kind"])
+    payload.setdefault("status", row["status"])
+    payload.setdefault("created_at", row["created_at"])
+    payload.setdefault("started_at", row["started_at"])
+    payload.setdefault("finished_at", row["finished_at"])
+    payload.setdefault("progress", row["progress"])
+    if int(row["cancel_requested"] or 0):
+        payload["cancel_requested"] = True
+    return _clean(payload)
+
+
+def _read_task_sqlite(task_id: str) -> dict[str, Any]:
+    try:
+        with _connect_tasks_db() as conn:
+            row = conn.execute("select * from tasks where task_id = ?", (task_id,)).fetchone()
+            return _task_from_sqlite_row(row)
+    except Exception:
+        return {}
+
+
+def _read_recent_tasks_sqlite(limit: int) -> list[dict[str, Any]]:
+    try:
+        with _connect_tasks_db() as conn:
+            rows = conn.execute(
+                "select * from tasks order by created_at desc, task_id desc limit ?",
+                (max(1, limit),),
+            ).fetchall()
+    except Exception:
+        return []
+    return [_task_from_sqlite_row(row) for row in rows if row is not None]
+
+
 def _read_task(path: Path) -> dict[str, Any]:
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
@@ -130,6 +271,7 @@ def _task_summary(task: dict[str, Any]) -> dict[str, Any]:
         "started_at",
         "finished_at",
         "progress",
+        "cancel_requested",
         "message_zh",
         "error_message_zh",
         "deduped",
@@ -280,6 +422,9 @@ def start_task(kind: str, fn: Callable[[], Any] | None = None, *, payload: dict[
 def get_task_status(task_id: str) -> dict[str, Any]:
     if not task_id:
         return {"status": "missing", "message_zh": "缺少任务 ID。"}
+    stored = _read_task_sqlite(task_id)
+    if stored:
+        return stored
     path = _task_path(task_id)
     if not path.exists():
         with _TASK_LOCK:
@@ -291,9 +436,13 @@ def get_task_status(task_id: str) -> dict[str, Any]:
 
 
 def get_recent_tasks(limit: int = 20) -> dict[str, Any]:
+    tasks_from_sqlite = _read_recent_tasks_sqlite(max(1, limit))
+    if tasks_from_sqlite:
+        tasks = [_task_summary(task) for task in tasks_from_sqlite if task.get("task_id")]
+        return _clean({"generated_at": _now(), "tasks": tasks, "count": len(tasks), "storage_backend": "sqlite"})
     files = sorted(_tasks_dir().glob("*.json"), key=lambda item: item.stat().st_mtime, reverse=True)
     tasks = [_task_summary(task) for path in files[: max(1, limit)] if (task := _read_task(path)).get("task_id")]
-    return _clean({"generated_at": _now(), "tasks": tasks, "count": len(tasks)})
+    return _clean({"generated_at": _now(), "tasks": tasks, "count": len(tasks), "storage_backend": "json_fallback"})
 
 
 def cancel_task(task_id: str) -> dict[str, Any]:

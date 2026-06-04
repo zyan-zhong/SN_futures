@@ -21,7 +21,7 @@ from sn_futures.services.task_notification_service import build_task_notificatio
 
 class SetupActionRunLedgerServiceTest(unittest.TestCase):
     def test_refresh_operator_runbook_records_safe_setup_action_entry(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {"SN_DATA_DIR": tmp}, clear=False):
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {"SN_DATA_DIR": tmp}, clear=True):
             result = run_setup_checklist_safe_action("refresh_operator_runbook")
             history = get_setup_action_history()
             telemetry = summarize_setup_action_telemetry()
@@ -43,7 +43,7 @@ class SetupActionRunLedgerServiceTest(unittest.TestCase):
         self.assertEqual(telemetry["current_step"], "configure_local_api_provider_credentials")
 
     def test_sample_fixture_action_records_success_without_unlocking_v12(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {"SN_DATA_DIR": tmp}, clear=False):
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {"SN_DATA_DIR": tmp}, clear=True):
             result = run_setup_checklist_safe_action("run_sample_fixture_contract")
             history = get_setup_action_history()
             telemetry = summarize_setup_action_telemetry()
@@ -55,7 +55,7 @@ class SetupActionRunLedgerServiceTest(unittest.TestCase):
         self.assertFalse(telemetry["customer_prediction_generated"])
 
     def test_failed_safe_action_records_failure_reason(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {"SN_DATA_DIR": tmp}, clear=False), patch(
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {"SN_DATA_DIR": tmp}, clear=True), patch(
             "sn_futures.services.setup_checklist_status_service.refresh_schema_mapping_report",
             side_effect=RuntimeError("schema mapping failed because endpoint unavailable"),
         ):
@@ -71,7 +71,7 @@ class SetupActionRunLedgerServiceTest(unittest.TestCase):
         self.assertFalse(history["action_history"][0]["customer_prediction_generated"])
 
     def test_unsafe_action_does_not_create_successful_run(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {"SN_DATA_DIR": tmp}, clear=False):
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {"SN_DATA_DIR": tmp}, clear=True):
             result = run_setup_checklist_safe_action("build_feature_store_v12")
             history = get_setup_action_history()
 
@@ -80,7 +80,7 @@ class SetupActionRunLedgerServiceTest(unittest.TestCase):
         self.assertEqual(history["successful_action_count"], 0)
 
     def test_history_sanitizes_secret_like_values(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {"SN_DATA_DIR": tmp}, clear=False), patch(
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {"SN_DATA_DIR": tmp}, clear=True), patch(
             "sn_futures.services.setup_checklist_status_service.refresh_managed_proxy_setup",
             return_value={
                 "status": "blocked",
@@ -99,7 +99,7 @@ class SetupActionRunLedgerServiceTest(unittest.TestCase):
         self.assertNotIn("https://example.invalid/private", serialized)
 
     def test_checklist_status_and_task_notifications_include_setup_action_summary(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {"SN_DATA_DIR": tmp}, clear=False):
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {"SN_DATA_DIR": tmp}, clear=True):
             run_setup_checklist_safe_action("refresh_operator_runbook")
             checklist = build_setup_checklist_status()
             notifications = build_task_notifications()

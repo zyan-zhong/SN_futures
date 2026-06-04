@@ -69,7 +69,14 @@ def load_user_secrets(*, override: bool = False) -> dict[str, str]:
     if not isinstance(raw, dict):
         return {}
     loaded: dict[str, str] = {}
-    for key in ("SN_ALPHA_VANTAGE_KEY", "SN_NEWSAPI_KEY", "SN_MANAGED_DATA_PROXY_TOKEN", "SN_TUSHARE_TOKEN"):
+    for key in (
+        "SN_ALPHA_VANTAGE_KEY",
+        "SN_NEWSAPI_KEY",
+        "SN_TUSHARE_TOKEN",
+        "SN_LOCAL_API_PROVIDER_TOKEN",
+        "SN_MANAGED_DATA_PROXY_TOKEN",
+        "SN_MANAGED_PROXY_TOKEN",
+    ):
         value = str(raw.get(key, "") or "").strip()
         if not value:
             continue

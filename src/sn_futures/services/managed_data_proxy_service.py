@@ -121,18 +121,23 @@ def _read_first_user_config_value(*names: str) -> str:
 
 
 def _managed_endpoint() -> str:
-    return _read_first_user_config_value("SN_MANAGED_PROXY_BASE_URL", "SN_MANAGED_DATA_PROXY_URL")
+    return _read_first_user_config_value(
+        "SN_LOCAL_API_PROVIDER_BASE_URL",
+        "SN_MANAGED_PROXY_BASE_URL",
+        "SN_MANAGED_DATA_PROXY_URL",
+    )
 
 
 def _managed_token() -> dict[str, Any]:
-    alias_value = _read_user_config_value("SN_MANAGED_PROXY_TOKEN")
-    resolved = resolve_secret("SN_MANAGED_DATA_PROXY_TOKEN")
-    value = alias_value or str(resolved.get("value") or "").strip()
+    resolved = resolve_secret("SN_LOCAL_API_PROVIDER_TOKEN")
+    value = str(resolved.get("value") or "").strip()
     return {
         "value": value,
-        "source": "env" if alias_value and os.environ.get("SN_MANAGED_PROXY_TOKEN") else ("user_secrets" if alias_value else str(resolved.get("source") or "none")),
+        "source": str(resolved.get("source") or "none"),
         "masked": mask_secret(value) if value else "",
         "configured": bool(value),
+        "deprecated": bool(resolved.get("deprecated")),
+        "deprecated_warning": str(resolved.get("deprecated_warning") or ""),
     }
 
 
@@ -243,6 +248,7 @@ def managed_proxy_status() -> dict[str, Any]:
     enabled = bool(
         token_info["configured"]
         or base_url
+        or os.getenv("SN_LOCAL_API_PROVIDER_ENABLED", "").strip().lower() in {"1", "true", "yes", "on"}
         or os.getenv("SN_MANAGED_PROXY_ENABLED", "").strip().lower() in {"1", "true", "yes", "on"}
         or os.getenv("SN_MANAGED_DATA_PROXY_ENABLED", "").strip().lower() in {"1", "true", "yes", "on"}
     )

@@ -139,6 +139,10 @@ def _provider_payload(provider_id: str) -> dict[str, Any]:
 
 def build_safe_provider_setup_commands() -> list[str]:
     return [
+        '$env:SN_LOCAL_API_PROVIDER_ENABLED="true"',
+        '$env:SN_LOCAL_API_PROVIDER_ID="custom_http_provider"',
+        '$env:SN_LOCAL_API_PROVIDER_BASE_URL="https://your-local-provider.example.com"',
+        '$env:SN_LOCAL_API_PROVIDER_TOKEN="<paste-token-only-in-your-local-shell>"',
         '$env:SN_DATA_PROVIDER_PRIMARY="twelvedata"',
         '$env:SN_MARKET_DATA_PROVIDER="twelvedata"',
         '$env:SN_MACRO_DATA_PROVIDER="fred"',

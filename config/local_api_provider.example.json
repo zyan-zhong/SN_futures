@@ -1,0 +1,7 @@
+{
+  "SN_LOCAL_API_PROVIDER_ENABLED": false,
+  "SN_LOCAL_API_PROVIDER_ID": "custom_http_provider",
+  "SN_LOCAL_API_PROVIDER_BASE_URL": "https://local-provider.example",
+  "SN_LOCAL_API_PROVIDER_TOKEN": "your_local_api_provider_token_here",
+  "note": "Copy to an ignored local config or set these variables in the local shell. Do not commit real endpoints or tokens."
+}

@@ -1066,7 +1066,17 @@ export function getInstitutionalStressTests(candidateVersion = "v1") {
   return getJson<InstitutionalStressTests>(`/api/terminal/validation/stress-tests?candidate_version=${encodeURIComponent(candidateVersion)}`);
 }
 
-export function saveSettingsSecrets(input: { SN_ALPHA_VANTAGE_KEY?: string; SN_NEWSAPI_KEY?: string; SN_MANAGED_DATA_PROXY_TOKEN?: string; SN_MANAGED_DATA_PROXY_URL?: string; SN_TUSHARE_TOKEN?: string }) {
+export function saveSettingsSecrets(input: {
+  SN_ALPHA_VANTAGE_KEY?: string;
+  SN_NEWSAPI_KEY?: string;
+  SN_TUSHARE_TOKEN?: string;
+  SN_LOCAL_API_PROVIDER_ENABLED?: string;
+  SN_LOCAL_API_PROVIDER_ID?: string;
+  SN_LOCAL_API_PROVIDER_BASE_URL?: string;
+  SN_LOCAL_API_PROVIDER_TOKEN?: string;
+  SN_MANAGED_DATA_PROXY_TOKEN?: string;
+  SN_MANAGED_DATA_PROXY_URL?: string;
+}) {
   return postJson<TerminalSettingsStatus>("/api/terminal/settings/secrets", input);
 }
 

@@ -70,6 +70,8 @@ $env:PYTHONPATH = "$PWD\src"
 python -m sn_futures.api_server
 ```
 
+`python -m sn_futures.api_server` is the direct local API server entrypoint for development and smoke tests. It uses the same `run_api_server()` implementation as `python app_launcher.py --api-server`; the launcher remains the desktop/packaging entrypoint. Set `$env:SN_TERMINAL_API_PORT = "8766"` or pass `--api-port 8766` when a specific port is needed.
+
 启动新版前端开发服务：
 
 ```powershell

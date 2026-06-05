@@ -849,3 +849,28 @@ def run_api_server(host: str = "127.0.0.1", port: int = 8765) -> None:
             server.server_close()
         finally:
             mark_server_shutdown(reason="server_exit")
+
+
+def main(argv: list[str] | None = None) -> None:
+    args = list(sys.argv[1:] if argv is None else argv)
+    host = "127.0.0.1"
+    port = 8765
+    if "--host" in args:
+        index = args.index("--host")
+        if index + 1 < len(args):
+            host = args[index + 1]
+    for flag in ("--api-port", "--port"):
+        if flag in args:
+            index = args.index(flag)
+            if index + 1 < len(args):
+                os.environ["SN_TERMINAL_API_PORT"] = args[index + 1]
+                try:
+                    port = int(args[index + 1])
+                except ValueError:
+                    port = 8765
+                break
+    run_api_server(host=host, port=port)
+
+
+if __name__ == "__main__":
+    main()

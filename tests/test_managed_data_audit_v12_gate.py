@@ -100,6 +100,30 @@ class ManagedDataAuditV12GateTest(unittest.TestCase):
                 json.dumps({"status": "pass", "gate_passed": True, "blocking_reasons": [], "warning_reasons": []}, ensure_ascii=False),
                 encoding="utf-8",
             )
+            (diagnostics_dir / "managed_data_production_cache_gate_report.json").write_text(
+                json.dumps(
+                    {
+                        "status": "ready",
+                        "production_cache_write_allowed": True,
+                        "production_cache_written": True,
+                        "feature_store_v12_allowed": True,
+                        "blocking_reasons": [],
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            (diagnostics_dir / "feature_store_v12_input_contract_report.json").write_text(
+                json.dumps(
+                    {
+                        "status": "ready",
+                        "input_contract_ready": True,
+                        "blocking_reasons": [],
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
             with patch(
                 "sn_futures.services.feature_store_v12_service.get_managed_proxy_health",
                 return_value={"status": "ready", "provider_status": "success_with_required_fields", "v12_allowed": True, "blocking_reasons": []},

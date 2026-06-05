@@ -15,7 +15,7 @@ sys.path.insert(0, "src")
 from sn_futures.services.feature_store_service import build_feature_store
 
 
-def _write_market(root: str, periods: int = 12) -> None:
+def _write_market(root: str, periods: int = 80) -> None:
     output = Path(root) / "outputs"
     output.mkdir(parents=True, exist_ok=True)
     rows = []

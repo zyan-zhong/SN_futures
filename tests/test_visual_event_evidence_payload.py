@@ -11,8 +11,10 @@ sys.path.insert(0, "src")
 
 class VisualEventEvidencePayloadTest(unittest.TestCase):
     def test_payload_contains_used_and_rejected_events(self) -> None:
+        old_data_env = os.environ.get("SN_DATA_DIR")
         old_env = os.environ.get("SN_INSIGHT_DATA_DIR")
         with tempfile.TemporaryDirectory() as tmp:
+            os.environ["SN_DATA_DIR"] = tmp
             os.environ["SN_INSIGHT_DATA_DIR"] = tmp
             from sn_futures.event_pipeline import get_event_evidence
             from sn_futures.news_store import upsert_articles
@@ -54,6 +56,10 @@ class VisualEventEvidencePayloadTest(unittest.TestCase):
             os.environ.pop("SN_INSIGHT_DATA_DIR", None)
         else:
             os.environ["SN_INSIGHT_DATA_DIR"] = old_env
+        if old_data_env is None:
+            os.environ.pop("SN_DATA_DIR", None)
+        else:
+            os.environ["SN_DATA_DIR"] = old_data_env
 
 
 if __name__ == "__main__":

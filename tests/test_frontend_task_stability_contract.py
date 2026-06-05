@@ -9,8 +9,8 @@ def test_refresh_buttons_disable_during_task_start_and_use_short_copy() -> None:
 
     assert "disabled={Boolean(running)}" in refresh_panel
     assert "刷新中" in refresh_panel
-    assert "任务" in task_bar
-    assert "详情" in task_bar
+    assert "Task Notification Center" in task_bar
+    assert "details" in task_bar
     assert "长任务在后台执行" not in task_bar
 
 
@@ -21,4 +21,3 @@ def test_no_long_json_or_repeated_disclaimer_in_simple_mode_components() -> None
     assert "JSON.stringify" not in app
     assert "JSON.stringify" not in sidebar
     assert sidebar.count("不构成投资建议") == 0
-

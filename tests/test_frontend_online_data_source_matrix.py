@@ -20,7 +20,8 @@ def test_settings_page_contains_managed_data_proxy_entry() -> None:
 
     assert "托管数据服务" in content
     assert "客户无需 CSV/Excel" in content
-    assert "SN_MANAGED_DATA_PROXY_TOKEN" in content
+    assert "SN_LOCAL_API_PROVIDER_TOKEN" in content
+    assert "SN_MANAGED_DATA_PROXY_TOKEN" not in content
     assert "license token" in content
 
 

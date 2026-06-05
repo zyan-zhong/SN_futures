@@ -226,10 +226,11 @@ class ManagedProxySetupServiceTest(unittest.TestCase):
         self.assertIn(".env.local", gitignore)
         self.assertIn("config/managed_proxy.local.json", gitignore)
         self.assertIn("secrets/", gitignore)
-        self.assertIn("SN_MANAGED_PROXY_BASE_URL", env_example)
-        self.assertIn("SN_MANAGED_PROXY_TOKEN", env_example)
-        self.assertIn("SN_MANAGED_PROXY_TIMEOUT_SECONDS", env_example)
+        self.assertIn("SN_LOCAL_API_PROVIDER_BASE_URL", env_example)
+        self.assertIn("SN_LOCAL_API_PROVIDER_TOKEN", env_example)
+        self.assertNotIn("SN_MANAGED_PROXY_TOKEN=", env_example)
         self.assertIn("SN_MANAGED_PROXY_BASE_URL", managed_example)
+        self.assertIn("deprecated", managed_example)
         self.assertNotIn("managed-secret-token", env_example + managed_example)
 
     def test_runtime_secret_scan_knows_managed_proxy_token_alias(self) -> None:

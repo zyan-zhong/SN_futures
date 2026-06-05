@@ -11,6 +11,10 @@ SNInsightTerminal 是面向上海期货交易所沪锡期货（SHFE SN）的本�
 - 本项目不接实盘交易接口，不提供自动下单、资金托管或交易执行功能。
 - 期货交易具有高杠杆和高风险，用户需独立判断并自行承担风险。
 
+## 架构与调研文档
+
+- 开源项目融合调研：`docs/OPEN_SOURCE_INTEGRATION_RESEARCH.md`
+
 ## 普通用户安装方式
 
 1. 下载或获取安装包：`release/SNInsightTerminal_Setup.exe`

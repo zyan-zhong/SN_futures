@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import tempfile
 import unittest
@@ -46,6 +47,87 @@ class TerminalSettingsApiTest(unittest.TestCase):
         self.assertNotIn("NEWSTEST123456", str(payload))
         self.assertIn("***", payload["alpha_vantage_masked"])
         self.assertIn("***", payload["newsapi_masked"])
+
+    def test_local_api_provider_secret_save_returns_masked_canonical_status(self) -> None:
+        token = "LOCAL_PROVIDER_TOKEN_1234567890"
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {"SN_DATA_DIR": tmp}, clear=True):
+            status, payload = handle_terminal_api(
+                "/api/terminal/settings/secrets",
+                "POST",
+                {},
+                {
+                    "SN_LOCAL_API_PROVIDER_TOKEN": token,
+                    "SN_LOCAL_API_PROVIDER_BASE_URL": "https://local-provider.example",
+                    "SN_LOCAL_API_PROVIDER_ID": "custom_http_provider",
+                    "SN_LOCAL_API_PROVIDER_ENABLED": "true",
+                },
+            )
+            secrets_file = Path(tmp) / "config" / "secrets.json"
+            saved = json.loads(secrets_file.read_text(encoding="utf-8"))
+
+        self.assertEqual(status, 200)
+        self.assertTrue(payload["local_api_provider_configured"])
+        self.assertTrue(payload["local_api_provider_base_url_configured"])
+        self.assertEqual(payload["local_api_provider_id"], "custom_http_provider")
+        self.assertEqual(payload["local_api_provider_source"], "user_secrets")
+        self.assertNotIn(token, json.dumps(payload, ensure_ascii=False))
+        self.assertIn("***", payload["local_api_provider_token_masked"])
+        self.assertEqual(saved["SN_LOCAL_API_PROVIDER_TOKEN"], token)
+        self.assertNotIn("SN_MANAGED_DATA_PROXY_TOKEN", saved)
+
+    def test_empty_secret_save_does_not_overwrite_existing_local_provider_token(self) -> None:
+        token = "LOCAL_PROVIDER_TOKEN_1234567890"
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {"SN_DATA_DIR": tmp}, clear=True):
+            first_status, first_payload = handle_terminal_api(
+                "/api/terminal/settings/secrets",
+                "POST",
+                {},
+                {"SN_LOCAL_API_PROVIDER_TOKEN": token},
+            )
+            second_status, second_payload = handle_terminal_api(
+                "/api/terminal/settings/secrets",
+                "POST",
+                {},
+                {"SN_LOCAL_API_PROVIDER_TOKEN": ""},
+            )
+
+        self.assertEqual(first_status, 200)
+        self.assertEqual(second_status, 200)
+        self.assertTrue(first_payload["local_api_provider_token_configured"])
+        self.assertTrue(second_payload["local_api_provider_token_configured"])
+        self.assertEqual(first_payload["local_api_provider_token_masked"], second_payload["local_api_provider_token_masked"])
+
+    def test_legacy_managed_env_returns_deprecated_warning_without_secret_leak(self) -> None:
+        token = "LEGACY_MANAGED_TOKEN_1234567890"
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(
+            os.environ,
+            {"SN_DATA_DIR": tmp, "SN_MANAGED_DATA_PROXY_TOKEN": token, "SN_MANAGED_DATA_PROXY_URL": "https://legacy.example"},
+            clear=True,
+        ):
+            payload = get_terminal_settings_status()
+
+        serialized = json.dumps(payload, ensure_ascii=False)
+        self.assertTrue(payload["local_api_provider_configured"])
+        self.assertTrue(payload["local_api_provider_deprecated"])
+        self.assertIn("SN_MANAGED_DATA_PROXY_TOKEN", payload["local_api_provider_deprecated_warnings"][0])
+        self.assertNotIn(token, serialized)
+        self.assertIn("***", payload["local_api_provider_token_masked"])
+
+    def test_settings_secrets_rejects_authorization_and_raw_endpoint_secret_fields(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {"SN_DATA_DIR": tmp}, clear=True):
+            status, payload = handle_terminal_api(
+                "/api/terminal/settings/secrets",
+                "POST",
+                {},
+                {
+                    "Authorization": "Bearer raw-secret-token-123456",
+                    "endpoint_secret": "raw-secret-token-123456",
+                },
+            )
+
+        self.assertEqual(status, 400)
+        self.assertEqual(payload["error"], "invalid_secret")
+        self.assertNotIn("raw-secret-token-123456", json.dumps(payload, ensure_ascii=False))
 
     def test_settings_reset_does_not_delete_other_user_data(self) -> None:
         with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {"SN_DATA_DIR": tmp}, clear=False):

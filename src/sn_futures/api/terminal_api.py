@@ -4,6 +4,7 @@ import json
 from typing import Any, Mapping
 
 from .json_utils import safe_json_dumps, sanitize_for_json
+from .terminal_router import build_terminal_router
 from ..data_providers.newsapi_provider import fetch_newsapi_status, test_newsapi_connection
 from ..runtime import get_user_output_dir
 from ..services.terminal_service import (
@@ -475,6 +476,42 @@ TERMINAL_API_DOCS["endpoints"].extend(
         {"method": "GET", "path": "/api/terminal/tasks/recent", "description": "读取最近异步任务。"},
         {"method": "GET", "path": "/api/terminal/task-notifications", "description": "Task Notification Center state; read-only and suppresses stale failed research task toast overlays."},
         {"method": "POST", "path": "/api/terminal/tasks/cancel", "description": "请求取消异步任务。"},
+    ]
+)
+
+
+TERMINAL_API_DOCS["endpoints"].extend(
+    [
+        {
+            "method": "GET",
+            "path": "/api/terminal/system/process-status",
+            "description": "Read local backend process runtime status; does not start tasks or expose secrets.",
+        },
+        {
+            "method": "POST",
+            "path": "/api/terminal/system/shutdown",
+            "description": "Request local backend shutdown; no remote service, trading action, or secret echo.",
+        },
+        {
+            "method": "POST",
+            "path": "/api/terminal/reports/full-system-txt",
+            "description": "Build a local full-system text report from existing diagnostics only.",
+        },
+        {
+            "method": "GET",
+            "path": "/api/terminal/reports/full-system-txt/latest",
+            "description": "Read the latest local full-system text report.",
+        },
+        {
+            "method": "GET",
+            "path": "/api/terminal/models/active-absence-diagnostics",
+            "description": "Read diagnostics explaining why no active model is available; no fake prediction is generated.",
+        },
+        {
+            "method": "POST",
+            "path": "/api/terminal/research/run-candidate-v6",
+            "description": "Run candidate_v6 gated research; dry-run only, no active publishing or customer prediction.",
+        },
     ]
 )
 
@@ -1404,6 +1441,16 @@ def _unknown_task_kind(kind: str) -> tuple[int, dict[str, Any]] | None:
     }
 
 
+_TERMINAL_ROUTER = None
+
+
+def _terminal_router():
+    global _TERMINAL_ROUTER
+    if _TERMINAL_ROUTER is None:
+        _TERMINAL_ROUTER = build_terminal_router(TERMINAL_API_DOCS)
+    return _TERMINAL_ROUTER
+
+
 def handle_terminal_api(
     path: str,
     method: str = "GET",
@@ -1413,6 +1460,10 @@ def handle_terminal_api(
     method = method.upper()
     if not path.startswith("/api/terminal/"):
         return 404, {"error": "not_found", "message": "不是 terminal API 路径。"}
+
+    router = _terminal_router()
+    if router.path_registered(path):
+        return router.dispatch(method, path, query, body)
 
     if method == "GET":
         if path == "/api/terminal/docs":

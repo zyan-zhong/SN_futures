@@ -14,7 +14,6 @@ import pandas as pd
 
 from .bootstrap.runtime_guard import runtime_status
 from .chart_alignment import build_forecast_curve
-from .config import ProjectPaths
 from .event_features import build_event_evidence, sync_event_store_from_news
 from .event_store import load_events, load_provider_status, resolve_event_url
 from .hardware import detect_hardware_profile, load_hardware_profile, resolve_compute_profile
@@ -22,6 +21,7 @@ from .horizon_registry import list_horizon_configs
 from .position_scenario import evaluate_position_scenario
 from .prediction_display import apply_direction_gate, build_data_trust_badges, explain_driver
 from .price_risk import apply_realistic_price_gates
+from .runtime import get_user_output_dir
 from .services import (
     build_api_learning_status,
     build_api_model_health,
@@ -31,6 +31,8 @@ from .services import (
     integrate_live_prediction_payload,
     sanitize_for_json,
 )
+from .services.provenance_gate_service import build_runtime_provenance_report, evaluate_provenance_gate
+from .services.prediction_layers_service import attach_prediction_layers, build_blocked_prediction_payload
 from .trading_calendar import sn_trading_session_state
 from .unified_forecast import LIVE_CARD_ORDER, build_unified_forecast, load_unified_forecast, save_unified_forecast
 
@@ -89,7 +91,7 @@ DISPLAY_STATUS_LABELS = {
 
 
 def _output_dir(output_dir: Path | None = None) -> Path:
-    out = output_dir or ProjectPaths().output_dir
+    out = output_dir or get_user_output_dir()
     out.mkdir(parents=True, exist_ok=True)
     return out
 
@@ -117,90 +119,54 @@ def _now() -> str:
 
 
 def _candidate_output_dirs(output_dir: Path | None = None) -> list[Path]:
-    paths = [
-        output_dir,
-        ProjectPaths().output_dir,
-        ProjectPaths().root / "outputs",
-        ProjectPaths().root / "app_data" / "outputs",
-        Path.cwd() / "outputs",
-        Path.cwd() / "app_data" / "outputs",
-    ]
-    unique: list[Path] = []
-    seen: set[str] = set()
-    for path in paths:
-        if path is None:
-            continue
-        try:
-            resolved = path.resolve()
-        except Exception:
-            resolved = path
-        key = str(resolved).lower()
-        if key in seen:
-            continue
-        seen.add(key)
-        if resolved.exists():
-            unique.append(resolved)
-    return unique
+    return [_output_dir(output_dir)]
 
 
-def _payload_quote_price(payload: Mapping[str, Any]) -> float:
-    quote = payload.get("live_quote") if isinstance(payload.get("live_quote"), Mapping) else {}
-    if not quote:
-        wm = payload.get("data_watermark") if isinstance(payload.get("data_watermark"), Mapping) else {}
-        quote = wm.get("live_quote") if isinstance(wm.get("live_quote"), Mapping) else {}
-    return _safe_float(quote.get("latest") if isinstance(quote, Mapping) else None, 0.0)
+def _attach_runtime_source(payload: dict[str, Any], *, path: Path, root: Path) -> dict[str, Any]:
+    payload = dict(payload)
+    payload["source_path"] = str(path)
+    payload["runtime_root"] = str(root)
+    return payload
 
 
-def _payload_score(payload: Mapping[str, Any], path: Path) -> float:
-    cards = payload.get("cards") if isinstance(payload.get("cards"), Mapping) else {}
-    wm = payload.get("data_watermark") if isinstance(payload.get("data_watermark"), Mapping) else {}
-    quote_price = _payload_quote_price(payload)
-    score = 0.0
-    score += min(len(cards), 7) * 20.0
-    score += 100.0 if quote_price > 0 else 0.0
-    score += 20.0 if wm.get("latest_realtime") or wm.get("latest_daily") else 0.0
-    score += _safe_float(wm.get("quality_score"), 0.0) * 10.0
-    try:
-        score += path.stat().st_mtime / 1_000_000_000.0
-    except Exception:
-        pass
-    return score
-
-
-def _load_best_json(filename: str, output_dir: Path | None = None) -> dict[str, Any]:
-    best: tuple[float, dict[str, Any]] | None = None
-    for directory in _candidate_output_dirs(output_dir):
-        path = directory / filename
-        payload = _read_json(path)
-        if not payload:
-            continue
-        score = _payload_score(payload, path)
-        if best is None or score > best[0]:
-            best = (score, payload)
-    return best[1] if best else {}
+def _load_runtime_json(filename: str, output_dir: Path | None = None) -> dict[str, Any]:
+    root = _output_dir(output_dir)
+    path = root / filename
+    payload = _read_json(path)
+    if not payload:
+        return {}
+    return _attach_runtime_source(payload, path=path, root=root)
 
 
 def _latest_live_file(out: Path) -> dict[str, Any]:
-    return _load_best_json("sn_live_predictions.json", out)
+    return _load_runtime_json("sn_live_predictions.json", out)
 
 
 def _snapshot_file(out: Path) -> dict[str, Any]:
-    return _load_best_json("sn_live_snapshot.json", out)
+    return _load_runtime_json("sn_live_snapshot.json", out)
 
 
 def _unified_payload(out: Path | None = None) -> dict[str, Any]:
     root = _output_dir(out)
-    payload = _load_best_json("sn_unified_forecast.json", root) or load_unified_forecast(root, max_age_minutes=720)
+    unified_path = root / "sn_unified_forecast.json"
+    payload = _load_runtime_json("sn_unified_forecast.json", root)
+    if not payload:
+        loaded = load_unified_forecast(root, max_age_minutes=720)
+        payload = _attach_runtime_source(loaded, path=unified_path, root=root) if loaded else {}
     if payload:
         return payload
     live = _latest_live_file(root)
     if live:
         payload = build_unified_forecast(live, output_dir=root, data_watermark=get_data_watermark(root), hardware_profile=get_hardware_profile(root), persist=True)
+        payload["source_path"] = str(unified_path)
+        payload["runtime_root"] = str(root)
         return payload
     return {
         "cards": {},
         "data_watermark": get_data_watermark(root),
         "unified_generated_at": _now(),
+        "source_path": "",
+        "runtime_root": str(root),
         "disclaimer": DISCLAIMER,
     }
 
@@ -214,11 +180,108 @@ def _live_quote_from_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
     return dict(quote)
 
 
+def _live_overlay_manifest(display_only: bool) -> dict[str, bool]:
+    return {
+        "history_immutable": True,
+        "live_overlay_used_for_display_only": bool(display_only),
+        "live_overlay_used_for_training": False,
+        "live_overlay_used_for_backtest": False,
+    }
+
+
+def _latest_quote_marker(latest_quote: Mapping[str, Any], source: str) -> dict[str, Any]:
+    latest_price = _safe_float(latest_quote.get("latest"), 0.0)
+    if latest_price <= 0:
+        return {}
+    return {
+        "type": "latest_quote_marker",
+        "price": latest_price,
+        "quote_time": str(latest_quote.get("quote_time") or _now()),
+        "symbol": str(latest_quote.get("symbol") or latest_quote.get("contract_code") or "SN"),
+        "source": source,
+    }
+
+
+def _provenance_gate_from_watermark(watermark: Mapping[str, Any], purpose: str) -> dict[str, Any]:
+    gates = watermark.get("provenance_gates") if isinstance(watermark.get("provenance_gates"), Mapping) else {}
+    gate = gates.get(purpose) if isinstance(gates, Mapping) else None
+    if isinstance(gate, Mapping):
+        return dict(gate)
+    records = watermark.get("provenance_records") if isinstance(watermark.get("provenance_records"), list) else []
+    return evaluate_provenance_gate([row for row in records if isinstance(row, Mapping)], purpose=purpose)
+
+
+def _merge_blocking_reasons(*groups: Any) -> list[str]:
+    reasons: list[str] = []
+    for group in groups:
+        values = group if isinstance(group, list) else []
+        for reason in values:
+            text = str(reason)
+            if text and text not in reasons:
+                reasons.append(text)
+    return reasons
+
+
+def _attach_provenance_to_watermark(wm: dict[str, Any], out: Path) -> dict[str, Any]:
+    provenance = build_runtime_provenance_report(out, aggregate_watermark=wm)
+    records = provenance.get("records") if isinstance(provenance.get("records"), list) else []
+    gates = provenance.get("gates") if isinstance(provenance.get("gates"), Mapping) else {}
+    prediction_gate = gates.get("prediction") if isinstance(gates.get("prediction"), Mapping) else {}
+    wm["provenance_schema_version"] = provenance.get("schema_version")
+    wm["provenance_records"] = records
+    wm["provenance_gates"] = gates
+    wm["provenance_gate"] = prediction_gate
+    wm["allowed_for_display"] = bool(gates.get("display", {}).get("allowed_for_display")) if isinstance(gates.get("display"), Mapping) else False
+    wm["allowed_for_feature_store"] = bool(
+        gates.get("feature_store", {}).get("allowed_for_feature_store")
+    ) if isinstance(gates.get("feature_store"), Mapping) else False
+    wm["allowed_for_training"] = bool(gates.get("training", {}).get("allowed_for_training")) if isinstance(gates.get("training"), Mapping) else False
+    wm["allowed_for_prediction"] = bool(prediction_gate.get("allowed_for_prediction")) if isinstance(prediction_gate, Mapping) else False
+    wm["allowed_for_backtest"] = bool(gates.get("backtest", {}).get("allowed_for_backtest")) if isinstance(gates.get("backtest"), Mapping) else False
+    wm["sample_data_used"] = bool(wm.get("sample_data_used") or provenance.get("sample_data_used"))
+    wm["baseline_used"] = bool(wm.get("baseline_used") or provenance.get("baseline_used"))
+    wm["blocking_reasons"] = _merge_blocking_reasons(wm.get("blocking_reasons"), prediction_gate.get("blocking_reasons") if isinstance(prediction_gate, Mapping) else [])
+    if records:
+        cache_values = {str(row.get("cache_status") or "") for row in records if isinstance(row, Mapping)}
+        stale_values = {str(row.get("stale_status") or "") for row in records if isinstance(row, Mapping)}
+        wm["cache_status"] = (
+            "last_good_cache"
+            if "last_good_cache" in cache_values
+            else "remote"
+            if "remote" in cache_values
+            else "cache"
+            if "cache" in cache_values
+            else "missing"
+        )
+        wm["provenance_stale_status"] = (
+            "missing"
+            if "missing" in stale_values
+            else "stale"
+            if "stale" in stale_values
+            else "fresh"
+            if "fresh" in stale_values
+            else "recent"
+        )
+        wm["source_url_sanitized"] = next((str(row.get("source_url_sanitized") or "") for row in records if isinstance(row, Mapping) and row.get("source_url_sanitized")), "")
+    else:
+        wm["cache_status"] = "missing"
+        wm["provenance_stale_status"] = "missing"
+        wm.setdefault("source_url_sanitized", "")
+    wm["is_real_data_only"] = bool(records) and not bool(wm.get("sample_data_used")) and not bool(wm.get("baseline_used"))
+    wm["research_data_ready"] = bool(wm.get("allowed_for_prediction") and wm.get("allowed_for_backtest"))
+    return wm
+
+
 def get_data_watermark(output_dir: Path | None = None) -> dict[str, Any]:
     out = _output_dir(output_dir)
-    unified = _load_best_json("sn_unified_forecast.json", out) or load_unified_forecast(out)
+    unified_path = out / "sn_unified_forecast.json"
+    unified = _load_runtime_json("sn_unified_forecast.json", out)
+    if not unified:
+        loaded = load_unified_forecast(out)
+        unified = _attach_runtime_source(loaded, path=unified_path, root=out) if loaded else {}
     if isinstance(unified.get("data_watermark"), dict):
         wm = dict(unified["data_watermark"])
+        wm["source_path"] = str(unified.get("source_path") or unified_path)
     else:
         snapshot = _snapshot_file(out)
         meta = snapshot.get("contract_meta", {}) if isinstance(snapshot.get("contract_meta"), dict) else {}
@@ -245,8 +308,14 @@ def get_data_watermark(output_dir: Path | None = None) -> dict[str, Any]:
                 "open_interest": _safe_float(quote.get("open_interest"), 0.0),
             } if quote else {},
             "live_overlay_used": bool(quote),
+            "source_path": str(snapshot.get("source_path") or "") if snapshot else "",
         }
+    wm["runtime_root"] = str(out)
+    wm["source_path"] = str(wm.get("source_path") or "")
     live_quote = wm.get("live_quote") if isinstance(wm.get("live_quote"), Mapping) else {}
+    display_overlay_used = bool(wm.get("live_overlay_used") or live_quote)
+    wm["live_overlay_used"] = display_overlay_used
+    wm.update(_live_overlay_manifest(display_overlay_used))
     latest_price = _safe_float(live_quote.get("latest") if isinstance(live_quote, Mapping) else None, 0.0)
     quote_time = str(
         (live_quote.get("quote_time") if isinstance(live_quote, Mapping) else "")
@@ -274,6 +343,7 @@ def get_data_watermark(output_dir: Path | None = None) -> dict[str, Any]:
     wm["data_age_seconds"] = data_age_seconds
     wm["stale_status"] = "stale_or_missing_quote" if not latest_price or not quote_time else ("stale" if (data_age_seconds or 0) > 3600 * 24 else "fresh_or_recent")
     wm["using_fallback"] = bool(wm.get("using_fallback") or "fallback" in source.lower() or not latest_price)
+    wm = _attach_provenance_to_watermark(wm, out)
     wm.setdefault("disclaimer", DISCLAIMER)
     return wm
 
@@ -546,9 +616,28 @@ def _ensure_prediction_metadata(payload: MutableMapping[str, Any], watermark: Ma
 
 def get_live_predictions(output_dir: Path | None = None) -> dict[str, Any]:
     out = _output_dir(output_dir)
+    watermark = get_data_watermark(out)
+    prediction_gate = _provenance_gate_from_watermark(watermark, "prediction")
+    if not prediction_gate.get("allowed"):
+        blocked_payload = build_blocked_prediction_payload(
+            blocking_reasons=prediction_gate.get("blocking_reasons", []),
+            data_gate=prediction_gate,
+            data_watermark=watermark,
+        )
+        blocked_payload.update(
+            {
+                "provenance_gate": prediction_gate,
+                "live_quote": watermark.get("live_quote") if isinstance(watermark.get("live_quote"), Mapping) else {},
+                "source_path": str(watermark.get("source_path") or ""),
+                "runtime_root": str(out),
+            }
+        )
+        return integrate_live_prediction_payload(
+            blocked_payload,
+            horizon_labels=HORIZON_LABELS,
+        )
     payload = _unified_payload(out)
     cards = payload.get("cards", {}) if isinstance(payload.get("cards"), dict) else {}
-    watermark = get_data_watermark(out)
     quality = _safe_float(watermark.get("quality_score"), 0.55)
     minute_data_available = bool(watermark.get("minute_data_available"))
     payload["cards"] = {key: cards[key] for key in LIVE_CARD_ORDER if key in cards}
@@ -562,10 +651,15 @@ def get_live_predictions(output_dir: Path | None = None) -> dict[str, Any]:
     )
     payload = apply_realistic_price_gates(payload)
     payload["data_watermark"] = watermark
+    payload["provenance_gate"] = prediction_gate
+    payload["blocking_reasons"] = prediction_gate.get("blocking_reasons", [])
     _ensure_prediction_metadata(payload, watermark)
     for horizon, card in (payload.get("cards") or {}).items():
         if isinstance(card, MutableMapping):
             _augment_card_display(card, horizon=str(horizon), watermark=watermark, output_dir=out)
+    payload = attach_prediction_layers(payload, data_gate=prediction_gate)
+    payload["source_path"] = str(payload.get("source_path") or "")
+    payload["runtime_root"] = str(out)
     payload["disclaimer"] = DISCLAIMER
     return integrate_live_prediction_payload(payload, horizon_labels=HORIZON_LABELS)
 
@@ -578,7 +672,21 @@ def _card_for_horizon(horizon: str) -> dict[str, Any]:
 
 def run_predict_api(symbol: str = "SN", horizon: str = "tomorrow", contract_type: str = "main", force_refresh: bool = False) -> dict[str, Any]:
     payload = get_live_predictions()
-    card = _card_for_horizon(horizon)
+    gate = payload.get("provenance_gate") if isinstance(payload.get("provenance_gate"), Mapping) else {}
+    if not gate.get("allowed"):
+        return {
+            "ok": False,
+            "status": "blocked",
+            "error": "provenance_gate_blocked",
+            "horizon": horizon,
+            "blocking_reasons": gate.get("blocking_reasons", []),
+            "provenance_gate": gate,
+            "data_quality": payload.get("data_watermark", {}),
+            "latest_quote": payload.get("live_quote") or payload.get("data_watermark", {}).get("live_quote", {}),
+            "disclaimer": DISCLAIMER,
+        }
+    cards = payload.get("cards", {}) if isinstance(payload.get("cards"), Mapping) else {}
+    card = dict(cards.get(horizon) or cards.get("tomorrow") or {})
     if not card:
         return {"ok": False, "error": "no_prediction_payload", "horizon": horizon, "disclaimer": DISCLAIMER}
     data_ts = str(card.get("asof_status", {}).get("latest_realtime") if isinstance(card.get("asof_status"), dict) else "")
@@ -770,6 +878,7 @@ def _chart_path_diagnostics(
     card: Mapping[str, Any],
     horizon: str,
 ) -> dict[str, Any]:
+    limit = _interval_growth_limit(horizon)
     if not history or not forecast:
         return {
             "status": "insufficient_data",
@@ -777,7 +886,12 @@ def _chart_path_diagnostics(
             "interval_growth_rate": None,
             "center_flatline_rate": None,
             "direction_price_conflict": False,
+            "price_path_terminal_return": None,
+            "max_interval_growth_allowed": limit,
+            "path_repair_reasons": [],
             "warnings": ["insufficient_chart_data"],
+            "event_shock_reason": "",
+            "price_band_reason": "历史波动率、ATR、兑现误差与事件强度联合约束",
         }
     last_price = _safe_float(history[-1].get("close") or history[-1].get("price"), 0.0)
     first_center = _safe_float(forecast[0].get("center") or forecast[0].get("pred_center"), last_price)
@@ -807,7 +921,6 @@ def _chart_path_diagnostics(
         if isinstance(value, list):
             repair_reasons.extend(str(item) for item in value)
     repair_reasons = sorted(set(repair_reasons))
-    limit = _interval_growth_limit(horizon)
     warnings: list[str] = []
     if interval_growth_rate > limit:
         warnings.append("interval_growth_watch")
@@ -869,9 +982,12 @@ def get_price_forecast_chart(horizon: str = "tomorrow") -> dict[str, Any]:
     card = dict((payload.get("cards") or {}).get(horizon) or {})
     history = _history_from_outputs(out)
     latest_quote = _live_quote_from_payload(payload)
-    latest_price = _safe_float(latest_quote.get("latest"), 0.0)
-    if latest_price > 0:
-        history.append({"ts": latest_quote.get("quote_time") or _now(), "close": latest_price, "source": "live_quote"})
+    display_overlay = _latest_quote_marker(latest_quote, "live_quote")
+    latest_point = (
+        {"ts": display_overlay["quote_time"], "price": display_overlay["price"], "source": display_overlay["source"]}
+        if display_overlay
+        else ({"ts": history[-1]["ts"], "price": history[-1]["close"], "source": history[-1].get("source", "")} if history else {})
+    )
     forecast = _forecast_points(card, horizon)
     events = get_events_evidence(horizon).get("events", [])[:20]
     path_diagnostics = _chart_path_diagnostics(history=history, forecast=forecast, card=card, horizon=horizon)
@@ -885,8 +1001,13 @@ def get_price_forecast_chart(horizon: str = "tomorrow") -> dict[str, Any]:
         "horizon_label": HORIZON_LABELS.get(horizon, horizon),
         "prediction_id": card.get("prediction_id", ""),
         "model_version": card.get("model_version", ""),
+        "source_path": str(payload.get("source_path") or ""),
+        "runtime_root": str(out),
         "history": history,
-        "latest_point": {"ts": history[-1]["ts"], "price": history[-1]["close"], "source": history[-1].get("source", "")} if history else {},
+        "latest_quote": latest_quote,
+        "display_overlay": display_overlay,
+        "manifest": _live_overlay_manifest(bool(display_overlay)),
+        "latest_point": latest_point,
         "forecast": forecast,
         "series": forecast,
         "events": events,
@@ -904,9 +1025,23 @@ def get_price_forecast_chart(horizon: str = "tomorrow") -> dict[str, Any]:
 
 
 def get_backtest_diagnostics(horizon: str = "") -> dict[str, Any]:
+    watermark = get_data_watermark()
+    gate = _provenance_gate_from_watermark(watermark, "backtest")
+    if not gate.get("allowed"):
+        return {
+            "status": "blocked",
+            "horizon": horizon or "all",
+            "blocking_reasons": gate.get("blocking_reasons", []),
+            "provenance_gate": gate,
+            "data_watermark": watermark,
+            "selected_horizon_metrics": {},
+            "promotion_result": "blocked_by_provenance_gate",
+            "baseline_comparison": {},
+            "metrics": {},
+            "disclaimer": DISCLAIMER,
+        }
     health = get_models_health()
     promotion = get_model_promotion_report(horizon or "tomorrow")
-    watermark = get_data_watermark()
     payload = build_backtest_diagnostics(
         horizon=horizon or "all",
         health=health,

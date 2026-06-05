@@ -32,6 +32,10 @@ def test_settings_page_does_not_persist_keys_to_local_storage() -> None:
     source = (FRONTEND / "src" / "pages" / "SettingsPage.tsx").read_text(encoding="utf-8")
     assert "SN_ALPHA_VANTAGE_KEY" in source
     assert "SN_NEWSAPI_KEY" in source
+    assert "SN_LOCAL_API_PROVIDER_TOKEN" in source
+    assert "SN_LOCAL_API_PROVIDER_BASE_URL" in source
+    assert "SN_MANAGED_DATA_PROXY_TOKEN" not in source
+    assert "SN_MANAGED_PROXY_TOKEN" not in source
     assert "useLocalSetting(\"SN_ALPHA_VANTAGE_KEY" not in source
     assert "useLocalSetting(\"SN_NEWSAPI_KEY" not in source
     assert "localStorage" not in source
@@ -46,4 +50,3 @@ def test_frontend_keeps_trade_and_secret_guardrails() -> None:
     assert "稳赚" not in text
     assert "SN_ALPHA_VANTAGE_KEY=" not in text
     assert "SN_NEWSAPI_KEY=" not in text
-

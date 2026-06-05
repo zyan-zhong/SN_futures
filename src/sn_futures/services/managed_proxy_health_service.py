@@ -81,7 +81,10 @@ def _write_health(payload: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def _enabled(token_configured: bool, endpoint_configured: bool) -> bool:
-    env_enabled = os.getenv("SN_MANAGED_DATA_PROXY_ENABLED", "").strip().lower() in {"1", "true", "yes", "on"}
+    env_enabled = any(
+        os.getenv(name, "").strip().lower() in {"1", "true", "yes", "on"}
+        for name in ("SN_LOCAL_API_PROVIDER_ENABLED", "SN_MANAGED_DATA_PROXY_ENABLED", "SN_MANAGED_PROXY_ENABLED")
+    )
     return bool(token_configured or endpoint_configured or env_enabled)
 
 

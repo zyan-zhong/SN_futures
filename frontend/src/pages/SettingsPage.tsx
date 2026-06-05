@@ -89,8 +89,10 @@ export function SettingsPage() {
     setMessage(null);
     try {
       const result = await saveSettingsSecrets({
-        SN_MANAGED_DATA_PROXY_TOKEN: managedToken.trim(),
-        SN_MANAGED_DATA_PROXY_URL: managedEndpoint.trim()
+        SN_LOCAL_API_PROVIDER_ENABLED: managedToken.trim() || managedEndpoint.trim() ? "true" : "",
+        SN_LOCAL_API_PROVIDER_ID: "custom_http_provider",
+        SN_LOCAL_API_PROVIDER_TOKEN: managedToken.trim(),
+        SN_LOCAL_API_PROVIDER_BASE_URL: managedEndpoint.trim()
       });
       if (result.success) {
         setManagedToken("");
@@ -506,9 +508,9 @@ export function SettingsPage() {
         <div className="metric-grid">
           <MetricCard
             label="托管服务"
-            value={status?.managed_data_proxy_configured && status?.managed_data_proxy_endpoint_configured ? "已配置" : "未配置"}
-            hint={`${status?.managed_data_proxy_masked || "可稍后配置"} / endpoint: ${status?.managed_data_proxy_endpoint_configured ? "已配置" : "未配置"}`}
-            tone={status?.managed_data_proxy_configured && status?.managed_data_proxy_endpoint_configured ? "good" : "warn"}
+            value={status?.local_api_provider_configured ? "已配置" : "未配置"}
+            hint={`${status?.local_api_provider_token_masked || "可稍后配置"} / endpoint: ${status?.local_api_provider_base_url_configured ? "已配置" : "未配置"}`}
+            tone={status?.local_api_provider_configured ? "good" : "warn"}
           />
           <MetricCard label="客户上传文件" value="否" hint="系统会优先尝试在线数据源。" tone="good" />
         </div>
@@ -521,7 +523,7 @@ export function SettingsPage() {
                 type="text"
                 value={managedEndpoint}
                 onChange={(event) => setManagedEndpoint(event.target.value)}
-                placeholder={status?.managed_data_proxy_endpoint || "https://issuer.example"}
+                placeholder={status?.local_api_provider_base_url || "https://local-provider.example"}
                 aria-label="托管数据服务 endpoint"
               />
             </div>

@@ -13,6 +13,7 @@ from .direction_ensemble import apply_direction_ensemble_to_payload
 from .news_policy import analyze_news_policy
 from .prediction_display import apply_direction_gate, build_data_trust_badges, explain_driver
 from .price_risk import apply_realistic_price_gates
+from .services.prediction_layers_service import attach_prediction_layers, capture_raw_prediction_layers
 
 
 UNIFIED_FORECAST_FILE = "sn_unified_forecast.json"
@@ -132,6 +133,15 @@ def _basic_watermark(
         and minute_cols.intersection(raw.columns)
         and any(raw[col].notna().any() for col in minute_cols.intersection(raw.columns))
     )
+    sample_data_used = bool(
+        base.get("sample_data_used")
+        or base.get("sample")
+        or base.get("sample_mode")
+        or latest_row.get("sample_data_used")
+        or latest_row.get("sample")
+        or latest_row.get("sample_mode")
+    )
+    baseline_used = bool(base.get("baseline_used") or latest_row.get("baseline_used"))
     base.update(
         {
             "created_at": datetime.now().isoformat(timespec="seconds"),
@@ -146,7 +156,13 @@ def _basic_watermark(
             "source_status": statuses or base.get("source_status", []),
             "live_quote": live_quote,
             "live_overlay_used": bool(live_quote) or bool(base.get("live_overlay_used")),
-            "is_real_data_only": True,
+            "history_immutable": True,
+            "live_overlay_used_for_display_only": bool(live_quote) or bool(base.get("live_overlay_used")),
+            "live_overlay_used_for_training": False,
+            "live_overlay_used_for_backtest": False,
+            "sample_data_used": sample_data_used,
+            "baseline_used": baseline_used,
+            "is_real_data_only": bool(latest_daily or live_quote) and not sample_data_used and not baseline_used,
             "disclaimer": DISCLAIMER,
         }
     )
@@ -326,6 +342,7 @@ def build_unified_forecast(
     ordered = {key: cards[key] for key in LIVE_CARD_ORDER if key in cards}
     ordered.update({key: value for key, value in cards.items() if key not in ordered})
     payload["cards"] = ordered
+    payload = capture_raw_prediction_layers(payload)
 
     watermark = _basic_watermark(raw=raw, live_snapshot=live_snapshot, fallback=data_watermark)
     news_policy = analyze_news_policy(out)
@@ -422,6 +439,11 @@ def build_unified_forecast(
     payload["unified_generated_at"] = datetime.now().isoformat(timespec="seconds")
     payload["unified_result_source"] = "统一链路：真实数据水位 -> 事件/方向候选 -> 价格连续性守门 -> 历史误差校准 -> UI"
     payload["disclaimer"] = DISCLAIMER
+    payload = attach_prediction_layers(
+        payload,
+        data_gate={"allowed": not bool(watermark.get("sample_data_used") or watermark.get("baseline_used")), "blocking_reasons": []},
+        calibration_profile=calibration_profile,
+    )
     if persist:
         save_unified_forecast(payload, out)
     return payload

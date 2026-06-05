@@ -27,6 +27,8 @@ class TerminalNewsRelevanceDiagnosticsApiTest(unittest.TestCase):
                                 "title": "SHFE tin inventory falls after Indonesia tin export quota delay",
                                 "description": "LME tin traders monitor warehouse stockpiles.",
                                 "query_group": "supply_asia",
+                                "published_at": "2026-05-20T03:00:00Z",
+                                "fetched_at": "2026-05-20T03:05:00Z",
                             }
                         ]
                     },

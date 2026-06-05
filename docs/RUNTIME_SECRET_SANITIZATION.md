@@ -89,3 +89,15 @@ The v2 dataset manifest records only feature names and runtime data availability
 `SN_TUSHARE_TOKEN` is covered by the same runtime secret boundary as other provider credentials. Source code, docs, tests, frontend bundles, logs, cache, outputs, diagnostics bundles, and release logs must not contain the complete token. The scanner treats `packaging/private_release_keys.json`, private bundle seeds, and user `config/secrets.json` as allowed private locations whose contents are not printed.
 
 Terminal APIs and frontend screens may show only `configured`, `source`, and `masked`. Provider error messages are sanitized before they are returned or written.
+## Local API Provider Secret Boundary
+
+The runtime secret scanner and sanitizer cover the canonical local provider token:
+
+- `SN_LOCAL_API_PROVIDER_TOKEN`
+
+The following legacy names remain scan targets only for backward compatibility and must produce deprecated warnings in status APIs:
+
+- `SN_MANAGED_PROXY_TOKEN`
+- `SN_MANAGED_DATA_PROXY_TOKEN`
+
+Settings APIs must reject `Authorization`, bearer tokens, `raw_token`, `raw_secret`, and endpoint secret fields in normal settings payloads. Base URLs must not include token, secret, api_key, apikey, or authorization query parameters.

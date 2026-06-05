@@ -105,10 +105,37 @@ def _provider(article: Mapping[str, Any]) -> str:
 
 
 def _published_at(article: Mapping[str, Any]) -> str:
-    for key in ("published_at", "publishedAt", "time_published", "datetime", "date"):
+    for key in ("source_published_at", "published_at", "publishedAt", "time_published", "datetime", "date"):
         if article.get(key):
             return str(article.get(key))
     return ""
+
+
+def _event_time_confidence(source_published_at: str) -> float:
+    if not source_published_at:
+        return 0.25
+    return 1.0 if parse_time(source_published_at) is not None else 0.40
+
+
+def _region(article: Mapping[str, Any], provider: str, source: str, url: str) -> str:
+    explicit = str(article.get("region") or "").strip().lower()
+    if explicit in {"china", "中国", "cn"}:
+        return "China"
+    if explicit in {"global", "international", "world"}:
+        return "global"
+    text = f"{provider} {source} {url}".lower()
+    if any(key in text for key in ("shfe", "miit", "ndrc", "mofcom", ".gov.cn", ".cn/")):
+        return "China"
+    return "global"
+
+
+def _language(article: Mapping[str, Any], text: str) -> str:
+    explicit = str(article.get("language") or article.get("query_language") or "").strip().lower()
+    if explicit in {"zh", "zh-cn", "cn"}:
+        return "zh"
+    if explicit in {"en", "english"}:
+        return "en"
+    return "zh" if re.search(r"[\u4e00-\u9fff]", text) else "en"
 
 
 def _event_type(text: str) -> str:
@@ -225,6 +252,7 @@ def build_event_from_article(article: Mapping[str, Any], *, batch_id: str = "") 
     now = pd.Timestamp.now(tz="Asia/Hong_Kong")
     available_text = str(article.get("available_at") or article.get("fetched_at") or now.isoformat())
     available_ts = parse_time(available_text)
+    event_time_confidence = _event_time_confidence(published)
     tier = source_tier(provider, source)
     relevance = _relevance(text)
     provider_lower = provider.lower()
@@ -258,9 +286,14 @@ def build_event_from_article(article: Mapping[str, Any], *, batch_id: str = "") 
         "canonical_url": url,
         "raw_url": raw_url,
         "url_status": resolved_url.url_status,
+        "url_sanitized": url,
+        "region": _region(article, provider, source, url),
+        "language": _language(article, text),
         "published_at": published,
+        "source_published_at": published,
         "fetched_at": str(article.get("fetched_at") or now.isoformat()),
         "available_at": available_text if available_ts is not None else "",
+        "event_time_confidence": round(event_time_confidence, 5),
         "updated_at": now.isoformat(),
         "category": _category(event_type),
         "event_type": event_type,
@@ -281,6 +314,7 @@ def build_event_from_article(article: Mapping[str, Any], *, batch_id: str = "") 
         "risk_score": round(impact if direction in {"volatility", "mixed"} else 0.0, 5),
         "time_decay_weight": round(decay, 5),
         "source_confidence": round(source_conf, 5),
+        "source_reliability_score": round(source_conf, 5),
         "final_event_weight": round(final_weight, 5),
         "used_in_model": 0,
         "rejected_reason": "",

@@ -8,7 +8,19 @@ from typing import Any
 from ..user_data import initialize_user_data_dir, secrets_path
 
 
-SECRET_KEYS = ("SN_ALPHA_VANTAGE_KEY", "SN_NEWSAPI_KEY", "SN_MANAGED_DATA_PROXY_TOKEN", "SN_TUSHARE_TOKEN")
+CANONICAL_SECRET_KEYS = (
+    "SN_ALPHA_VANTAGE_KEY",
+    "SN_NEWSAPI_KEY",
+    "SN_TUSHARE_TOKEN",
+    "SN_LOCAL_API_PROVIDER_TOKEN",
+)
+LEGACY_SECRET_KEYS = ("SN_MANAGED_DATA_PROXY_TOKEN", "SN_MANAGED_PROXY_TOKEN")
+SECRET_KEYS = (*CANONICAL_SECRET_KEYS, *LEGACY_SECRET_KEYS)
+SECRET_ALIASES: dict[str, tuple[str, ...]] = {
+    "SN_LOCAL_API_PROVIDER_TOKEN": ("SN_MANAGED_DATA_PROXY_TOKEN", "SN_MANAGED_PROXY_TOKEN"),
+    "SN_MANAGED_DATA_PROXY_TOKEN": ("SN_LOCAL_API_PROVIDER_TOKEN", "SN_MANAGED_PROXY_TOKEN"),
+    "SN_MANAGED_PROXY_TOKEN": ("SN_LOCAL_API_PROVIDER_TOKEN", "SN_MANAGED_DATA_PROXY_TOKEN"),
+}
 PLACEHOLDER_VALUES = {
     "***",
     "****",
@@ -16,11 +28,16 @@ PLACEHOLDER_VALUES = {
     "[masked]",
     "your_alpha_vantage_api_key_here",
     "your_newsapi_key_here",
+    "your_local_api_provider_token_here",
+    "your_managed_proxy_token_here",
     "your_tushare_token_here",
     "<本机真实 Tushare token>",
     "<本机真实 tushare token>",
     "<your_tushare_token>",
 }
+LEGACY_WARNING_TEMPLATE = (
+    "{legacy_name} is deprecated; use {canonical_name} for Local API Provider configuration."
+)
 
 
 def _project_root() -> Path:
@@ -67,6 +84,52 @@ def _is_placeholder_secret(value: Any) -> bool:
 def _clean_secret_value(value: Any) -> str:
     text = str(value or "").strip()
     return "" if _is_placeholder_secret(text) else text
+
+
+def canonical_secret_name(name: str) -> str:
+    return "SN_LOCAL_API_PROVIDER_TOKEN" if name in LEGACY_SECRET_KEYS else name
+
+
+def _candidate_names(name: str) -> tuple[str, ...]:
+    if name not in SECRET_KEYS:
+        return (name,)
+    canonical = canonical_secret_name(name)
+    candidates = [canonical]
+    candidates.extend(SECRET_ALIASES.get(canonical, ()))
+    if name not in candidates:
+        candidates.insert(0, name)
+    return tuple(dict.fromkeys(candidates))
+
+
+def _secret_record(
+    *,
+    requested_name: str,
+    resolved_name: str,
+    value: str,
+    source: str,
+) -> dict[str, Any]:
+    canonical = canonical_secret_name(requested_name)
+    legacy_used = resolved_name in LEGACY_SECRET_KEYS or requested_name in LEGACY_SECRET_KEYS
+    deprecated_warning = (
+        LEGACY_WARNING_TEMPLATE.format(legacy_name=resolved_name, canonical_name=canonical)
+        if resolved_name in LEGACY_SECRET_KEYS
+        else (
+            LEGACY_WARNING_TEMPLATE.format(legacy_name=requested_name, canonical_name=canonical)
+            if requested_name in LEGACY_SECRET_KEYS
+            else ""
+        )
+    )
+    return {
+        "name": canonical,
+        "requested_name": requested_name,
+        "resolved_name": resolved_name,
+        "configured": True,
+        "source": source,
+        "value": value,
+        "masked": mask_key(value),
+        "deprecated": bool(legacy_used),
+        "deprecated_warning": deprecated_warning,
+    }
 
 
 def read_user_secrets() -> dict[str, str]:
@@ -159,30 +222,68 @@ def resolve_secret(name: str) -> dict[str, Any]:
     """
 
     if name not in SECRET_KEYS:
-        return {"name": name, "configured": False, "source": "none", "value": "", "masked": ""}
+        return {
+            "name": name,
+            "requested_name": name,
+            "resolved_name": name,
+            "configured": False,
+            "source": "none",
+            "value": "",
+            "masked": "",
+            "deprecated": False,
+            "deprecated_warning": "",
+        }
 
-    user_record = read_user_secret_records().get(name, {})
-    user_value = str(user_record.get("value") or "")
-    if user_value:
-        source = str(user_record.get("source") or "user_secrets")
-        return {"name": name, "configured": True, "source": source, "value": user_value, "masked": mask_key(user_value)}
+    canonical = canonical_secret_name(name)
 
-    private_record = read_private_secret_records().get(name, {})
-    private_value = str(private_record.get("value") or "")
-    if private_value:
-        source = str(private_record.get("source") or "private_bundle")
-        return {"name": name, "configured": True, "source": source, "value": private_value, "masked": mask_key(private_value)}
+    user_records = read_user_secret_records()
+    for candidate in _candidate_names(name):
+        user_record = user_records.get(candidate, {})
+        user_value = str(user_record.get("value") or "")
+        if user_value:
+            source = str(user_record.get("source") or "user_secrets")
+            return _secret_record(requested_name=name, resolved_name=candidate, value=user_value, source=source)
 
-    env_value = _clean_secret_value(os.environ.get(name, ""))
-    if env_value:
-        return {"name": name, "configured": True, "source": "env", "value": env_value, "masked": mask_key(env_value)}
+    private_records = read_private_secret_records()
+    for candidate in _candidate_names(name):
+        private_record = private_records.get(candidate, {})
+        private_value = str(private_record.get("value") or "")
+        if private_value:
+            source = str(private_record.get("source") or "private_bundle")
+            return _secret_record(requested_name=name, resolved_name=candidate, value=private_value, source=source)
+
+    for candidate in _candidate_names(name):
+        env_value = _clean_secret_value(os.environ.get(candidate, ""))
+        if env_value:
+            return _secret_record(requested_name=name, resolved_name=candidate, value=env_value, source="env")
 
     if not _has_explicit_data_dir():
-        env_file_value = read_project_env_values().get(name, "")
-        if env_file_value:
-            return {"name": name, "configured": True, "source": ".env", "value": env_file_value, "masked": mask_key(env_file_value)}
+        env_file_values = read_project_env_values()
+        for candidate in _candidate_names(name):
+            env_file_value = env_file_values.get(candidate, "")
+            if env_file_value:
+                return _secret_record(
+                    requested_name=name,
+                    resolved_name=candidate,
+                    value=env_file_value,
+                    source=".env",
+                )
 
-    return {"name": name, "configured": False, "source": "none", "value": "", "masked": ""}
+    return {
+        "name": canonical,
+        "requested_name": name,
+        "resolved_name": canonical,
+        "configured": False,
+        "source": "none",
+        "value": "",
+        "masked": "",
+        "deprecated": name in LEGACY_SECRET_KEYS,
+        "deprecated_warning": (
+            LEGACY_WARNING_TEMPLATE.format(legacy_name=name, canonical_name=canonical)
+            if name in LEGACY_SECRET_KEYS
+            else ""
+        ),
+    }
 
 
 def resolved_secret_value(name: str) -> str:
@@ -191,7 +292,7 @@ def resolved_secret_value(name: str) -> str:
 
 def inject_resolved_secrets_into_environment() -> dict[str, str]:
     loaded: dict[str, str] = {}
-    for name in SECRET_KEYS:
+    for name in CANONICAL_SECRET_KEYS:
         resolved = resolve_secret(name)
         value = str(resolved.get("value") or "")
         if value:

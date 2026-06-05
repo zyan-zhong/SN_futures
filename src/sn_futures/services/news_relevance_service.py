@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import math
 import re
 from collections import defaultdict
@@ -9,7 +10,9 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from ..api.json_utils import sanitize_for_json
+from ..event_schema import EVENT_RECORD_SCHEMA_VERSION
 from ..runtime import get_user_output_dir
+from ..utils.secret_sanitizer import sanitize_url
 from .news_source_quality_service import build_source_quality_report, score_source_quality
 
 
@@ -186,6 +189,11 @@ INVENTORY_KEYWORDS_V3 = (
     "升贴水",
 )
 NEGATIVE_KEYWORDS_V3 = (
+    "AI stock",
+    "artificial intelligence",
+    "stock analytics",
+    "stock investing",
+    "portfolio widget",
     "Macworld",
     "PyPI",
     "Python package",
@@ -211,6 +219,8 @@ NEGATIVE_KEYWORDS_V3 = (
     "accessory review",
     "tin-colored",
 )
+
+EVENT_FACTOR_INPUT_SCHEMA_VERSION = "event-factor-inputs-v1"
 
 
 def _now() -> str:
@@ -285,10 +295,139 @@ def _round(value: float) -> float:
 
 
 def _published_date(event: Mapping[str, Any]) -> str:
-    raw = str(event.get("published_at") or event.get("publishedAt") or event.get("time") or "")[:10]
+    raw = str(event.get("source_published_at") or event.get("published_at") or event.get("publishedAt") or event.get("time") or "")[:10]
     if re.fullmatch(r"\d{4}-\d{2}-\d{2}", raw):
         return raw
-    return _now()[:10]
+    return ""
+
+
+def _source_published_at(event: Mapping[str, Any]) -> str:
+    for key in ("source_published_at", "published_at", "publishedAt", "time_published", "datetime", "date"):
+        value = event.get(key)
+        if value:
+            return str(value)
+    return ""
+
+
+def _fetched_at(event: Mapping[str, Any]) -> str:
+    return str(event.get("fetched_at") or event.get("fetchedAt") or event.get("generated_at") or _now())
+
+
+def _parse_time(value: Any) -> datetime | None:
+    if not value:
+        return None
+    text = str(value).replace("Z", "+00:00")
+    try:
+        parsed = datetime.fromisoformat(text)
+    except Exception:
+        return None
+    if parsed.tzinfo is not None:
+        parsed = parsed.astimezone().replace(tzinfo=None)
+    return parsed
+
+
+def _event_time_confidence(source_published_at: str) -> float:
+    if not source_published_at:
+        return 0.25
+    return 1.0 if _parse_time(source_published_at) is not None else 0.40
+
+
+def _available_at(event: Mapping[str, Any], source_published_at: str, fetched_at: str) -> str:
+    explicit = event.get("available_at")
+    if explicit:
+        return str(explicit)
+    if _parse_time(source_published_at) is not None:
+        return str(source_published_at)
+    return str(fetched_at or source_published_at or "")
+
+
+def _region(event: Mapping[str, Any]) -> str:
+    explicit = str(event.get("region") or "").strip().lower()
+    if explicit in {"china", "中国", "cn"}:
+        return "China"
+    if explicit in {"global", "international", "world"}:
+        return "global"
+    provider = str(event.get("provider") or "").lower()
+    source = str(_source_name(event.get("source")) or event.get("source") or "").lower()
+    url = str(event.get("url") or event.get("source_url") or "").lower()
+    if any(key in provider + " " + source + " " + url for key in ("shfe", "miit", "ndrc", "mofcom", ".gov.cn", ".cn/")):
+        return "China"
+    return "global"
+
+
+def _language(event: Mapping[str, Any]) -> str:
+    explicit = str(event.get("language") or event.get("query_language") or "").strip().lower()
+    if explicit in {"zh", "zh-cn", "cn"}:
+        return "zh"
+    if explicit in {"en", "english"}:
+        return "en"
+    text = _text(event)
+    return "zh" if re.search(r"[\u4e00-\u9fff]", text) else "en"
+
+
+def _event_id(event: Mapping[str, Any], source_published_at: str) -> str:
+    if event.get("event_id"):
+        return str(event.get("event_id"))
+    title = str(event.get("title") or "")
+    url = str(event.get("url") or event.get("source_url") or event.get("canonical_url") or "")
+    source = str(_source_name(event.get("source")) or event.get("provider") or "")
+    return hashlib.sha256(f"{title.lower()}|{url}|{source}|{source_published_at[:13]}".encode("utf-8")).hexdigest()[:24]
+
+
+def _content_hash(event: Mapping[str, Any]) -> str:
+    title = str(event.get("title") or "")
+    summary = str(event.get("description") or event.get("summary") or event.get("content") or "")
+    url = str(event.get("url") or event.get("source_url") or event.get("canonical_url") or "")
+    published = _source_published_at(event)
+    return hashlib.sha256(f"{title}|{summary}|{url}|{published}".encode("utf-8")).hexdigest()
+
+
+def _time_rejection_reason(event: Mapping[str, Any], *, cutoff: str) -> str:
+    published = _source_published_at(event)
+    confidence = _event_time_confidence(published)
+    if confidence < 0.5:
+        return "missing_source_published_at"
+    published_ts = _parse_time(published)
+    cutoff_ts = _parse_time(cutoff)
+    if published_ts is not None and cutoff_ts is not None and published_ts > cutoff_ts:
+        return "source_published_at_after_cutoff"
+    return ""
+
+
+def _event_record(event: Mapping[str, Any], score: Mapping[str, Any], *, cutoff: str) -> dict[str, Any]:
+    source_published_at = _source_published_at(event)
+    fetched_at = _fetched_at(event)
+    url = str(event.get("url") or event.get("source_url") or event.get("canonical_url") or "")
+    time_reason = _time_rejection_reason(event, cutoff=cutoff)
+    score_reason = str(score.get("exclusion_reason") or "")
+    used = bool(score.get("used_in_model")) and not time_reason
+    rejection_reason = "" if used else (time_reason or score_reason or "not_used_in_model")
+    return {
+        **dict(event),
+        **dict(score),
+        "event_record_schema_version": EVENT_RECORD_SCHEMA_VERSION,
+        "event_id": _event_id(event, source_published_at),
+        "title": str(event.get("title") or "")[:300],
+        "summary": str(event.get("summary") or event.get("description") or event.get("content") or "")[:1200],
+        "url_sanitized": sanitize_url(url),
+        "source": event.get("source"),
+        "provider": str(event.get("provider") or ""),
+        "region": _region(event),
+        "category": str(score.get("category") or "irrelevant"),
+        "language": _language(event),
+        "source_published_at": source_published_at,
+        "published_at": source_published_at,
+        "fetched_at": fetched_at,
+        "available_at": _available_at(event, source_published_at, fetched_at),
+        "event_time_confidence": _event_time_confidence(source_published_at),
+        "relevance_score": float(score.get("relevance_score") or 0.0),
+        "source_reliability_score": float(score.get("source_reliability_score") or 0.0),
+        "used_in_model": used,
+        "allowed_for_event_factor": used,
+        "rejection_reason": rejection_reason,
+        "rejected_reason": rejection_reason,
+        "content_hash": _content_hash(event),
+    }
 
 
 def score_news_relevance(article: Mapping[str, Any]) -> dict[str, Any]:
@@ -450,6 +589,8 @@ def score_news_relevance(article: Mapping[str, Any]) -> dict[str, Any]:  # type:
         raw_score += 0.08
     if plain_tin_hits and any(term in lower for term in ("can", "foil", "package", "packaging", "canned")):
         raw_score -= 0.28
+    if negative_keyword_penalty >= 0.4 or domain_blacklist_penalty >= 0.5:
+        hard_evidence_score = 0.0
     relevance_score = _round(raw_score - negative_keyword_penalty - domain_blacklist_penalty)
     display_relevant = relevance_score >= 0.25
 
@@ -547,14 +688,15 @@ def score_news_relevance(article: Mapping[str, Any]) -> dict[str, Any]:  # type:
     }
 
 
-def apply_news_relevance(events: list[Mapping[str, Any]]) -> dict[str, Any]:
+def apply_news_relevance(events: list[Mapping[str, Any]], *, cutoff: str | None = None) -> dict[str, Any]:
+    cutoff_text = cutoff or _now()
     enhanced: list[dict[str, Any]] = []
     high: list[dict[str, Any]] = []
     low: list[dict[str, Any]] = []
     rejected: list[dict[str, Any]] = []
     for event in events:
-        scored = dict(event)
-        scored.update(score_news_relevance(event))
+        score = score_news_relevance(event)
+        scored = _event_record(event, score, cutoff=cutoff_text)
         if scored["used_in_model"]:
             high.append(scored)
         elif scored["display_relevant"]:
@@ -580,17 +722,27 @@ def _aggregate_event_factor_inputs(events: list[Mapping[str, Any]]) -> list[dict
 
     inputs: list[dict[str, Any]] = []
     for trade_date in sorted(grouped):
+        if not trade_date:
+            continue
         rows = grouped[trade_date]
         relevance_values = [float(row.get("relevance_score") or 0.0) for row in rows]
         source_weighted = [
             float(row.get("relevance_score") or 0.0) * float(row.get("source_reliability_score") or 0.0)
             for row in rows
         ]
+        published_values = [str(row.get("source_published_at") or row.get("published_at") or "") for row in rows]
+        published_values = [value for value in published_values if value]
+        available_values = [str(row.get("available_at") or "") for row in rows]
+        available_values = [value for value in available_values if value]
         inputs.append(
             {
                 "trade_date": trade_date,
                 "news_count": len(rows),
                 "used_in_model_count": len(rows),
+                "used_in_model": True,
+                "source_published_at": max(published_values) if published_values else "",
+                "available_at": max(available_values) if available_values else "",
+                "event_ids": [str(row.get("event_id") or "") for row in rows if row.get("event_id")],
                 "supply_shock_score": round(sum(float(row.get("supply_chain_score") or 0.0) for row in rows), 4),
                 "demand_shock_score": round(sum(float(row.get("demand_chain_score") or 0.0) for row in rows), 4),
                 "inventory_shock_score": round(sum(float(row.get("inventory_score") or 0.0) for row in rows), 4),
@@ -634,9 +786,9 @@ def refresh_news_relevance() -> dict[str, Any]:
     payload = _read_json(source_path)
     rows = payload.get("events", []) if isinstance(payload, Mapping) and isinstance(payload.get("events"), list) else []
     events = [row for row in rows if isinstance(row, Mapping)]
-    result = apply_news_relevance(events)
-    inputs = _aggregate_event_factor_inputs(result["high_relevance_events"])
     now = _now()
+    result = apply_news_relevance(events, cutoff=now)
+    inputs = _aggregate_event_factor_inputs(result["high_relevance_events"])
     no_model_events = result["used_in_model_count"] == 0
     status = {
         "source_name": "news_relevance",
@@ -659,6 +811,36 @@ def refresh_news_relevance() -> dict[str, Any]:
         "events": result["high_relevance_events"],
         "inputs": inputs,
         "used_in_model_count": result["used_in_model_count"],
+        "cutoff": {
+            "as_of": now,
+            "source_published_at_lte": now,
+            "available_at_lte": now,
+            "point_in_time": True,
+        },
+        "manifest": {
+            "schema_version": EVENT_FACTOR_INPUT_SCHEMA_VERSION,
+            "event_record_schema_version": EVENT_RECORD_SCHEMA_VERSION,
+            "source_path": str(source_path),
+            "generated_at": now,
+            "cutoff": now,
+            "row_count": len(events),
+            "used_in_model_count": result["used_in_model_count"],
+            "low_relevance_count": result["low_relevance_count"],
+            "rejected_count": result["rejected_count"],
+            "source_published_at_required_for_model": True,
+            "event_time_confidence_min_for_model": 0.5,
+            "sample_data_used": False,
+            "baseline_used": False,
+            "llm_used": False,
+            "content_hash": hashlib.sha256(
+                json.dumps(
+                    {"events": result["high_relevance_events"], "inputs": inputs, "cutoff": now},
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    default=str,
+                ).encode("utf-8")
+            ).hexdigest(),
+        },
         "message_zh": (
             "本周期无通过相关性门槛的锡产业新闻。"
             if no_model_events

@@ -11,7 +11,16 @@ from sn_futures.v2_api import evaluate_position_scenario_api, get_backtest_diagn
 
 class V38DisplayLearningPositionContractTest(unittest.TestCase):
     def test_live_cards_include_chinese_display_contract(self) -> None:
-        cards = get_live_predictions().get("cards", {})
+        payload = get_live_predictions()
+        cards = payload.get("cards", {})
+        if payload.get("status") == "blocked":
+            self.assertEqual({}, cards)
+            self.assertIn("blocking_reasons", payload)
+            self.assertIn("guarded_layer", payload)
+            self.assertIn("display_layer", payload)
+            self.assertFalse(payload["guarded_layer"]["allowed_for_prediction"])
+            self.assertTrue(payload["display_layer"]["display_only"])
+            return
         self.assertEqual(
             {
                 "next_5m",

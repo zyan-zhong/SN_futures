@@ -9,11 +9,52 @@ from typing import Any, Mapping
 from ..config import mask_secret
 from ..private_bundle_keys import import_private_bundle_keys_if_needed, restore_private_bundle_defaults
 from ..user_data import get_user_data_root, initialize_user_data_dir, secrets_path, user_path
-from .api_key_resolver import SECRET_KEYS, resolve_secret
+from .api_key_resolver import CANONICAL_SECRET_KEYS, LEGACY_SECRET_KEYS, resolve_secret
 
 
-ALLOWED_SECRET_KEYS = SECRET_KEYS
-ALLOWED_CONFIG_KEYS = ("SN_MANAGED_DATA_PROXY_URL",)
+ALLOWED_SECRET_KEYS = (*CANONICAL_SECRET_KEYS, *LEGACY_SECRET_KEYS)
+ALLOWED_CONFIG_KEYS = (
+    "SN_LOCAL_API_PROVIDER_ENABLED",
+    "SN_LOCAL_API_PROVIDER_ID",
+    "SN_LOCAL_API_PROVIDER_BASE_URL",
+    "SN_MANAGED_DATA_PROXY_URL",
+    "SN_MANAGED_DATA_PROXY_ENABLED",
+    "SN_MANAGED_PROXY_BASE_URL",
+    "SN_MANAGED_PROXY_ENABLED",
+)
+SECRET_KEY_CANONICAL: dict[str, str] = {
+    "SN_MANAGED_DATA_PROXY_TOKEN": "SN_LOCAL_API_PROVIDER_TOKEN",
+    "SN_MANAGED_PROXY_TOKEN": "SN_LOCAL_API_PROVIDER_TOKEN",
+}
+CONFIG_KEY_CANONICAL: dict[str, str] = {
+    "SN_MANAGED_DATA_PROXY_URL": "SN_LOCAL_API_PROVIDER_BASE_URL",
+    "SN_MANAGED_PROXY_BASE_URL": "SN_LOCAL_API_PROVIDER_BASE_URL",
+    "SN_MANAGED_DATA_PROXY_ENABLED": "SN_LOCAL_API_PROVIDER_ENABLED",
+    "SN_MANAGED_PROXY_ENABLED": "SN_LOCAL_API_PROVIDER_ENABLED",
+}
+FORBIDDEN_PAYLOAD_KEYS = {
+    "authorization",
+    "auth_header",
+    "authorization_header",
+    "endpoint_secret",
+    "raw_endpoint_secret",
+    "raw_secret",
+    "raw_token",
+    "bearer",
+}
+LOCAL_PROVIDER_CONFIG_ALIASES: dict[str, tuple[str, ...]] = {
+    "SN_LOCAL_API_PROVIDER_BASE_URL": (
+        "SN_LOCAL_API_PROVIDER_BASE_URL",
+        "SN_MANAGED_DATA_PROXY_URL",
+        "SN_MANAGED_PROXY_BASE_URL",
+    ),
+    "SN_LOCAL_API_PROVIDER_ENABLED": (
+        "SN_LOCAL_API_PROVIDER_ENABLED",
+        "SN_MANAGED_DATA_PROXY_ENABLED",
+        "SN_MANAGED_PROXY_ENABLED",
+    ),
+    "SN_LOCAL_API_PROVIDER_ID": ("SN_LOCAL_API_PROVIDER_ID",),
+}
 
 
 def _read_secrets() -> dict[str, Any]:
@@ -25,6 +66,86 @@ def _read_secrets() -> dict[str, Any]:
     except Exception:
         return {}
     return raw if isinstance(raw, dict) else {}
+
+
+def _clean_text(value: Any) -> str:
+    return str(value or "").strip()
+
+
+def _is_truthy(value: Any) -> bool:
+    return _clean_text(value).lower() in {"1", "true", "yes", "on", "enabled"}
+
+
+def _canonical_secret_key(name: str) -> str:
+    return SECRET_KEY_CANONICAL.get(name, name)
+
+
+def _canonical_config_key(name: str) -> str:
+    return CONFIG_KEY_CANONICAL.get(name, name)
+
+
+def _deprecated_warning(legacy_name: str, canonical_name: str) -> str:
+    return f"{legacy_name} is deprecated; use {canonical_name} for Local API Provider configuration."
+
+
+def _config_value(stored: Mapping[str, Any], canonical_name: str) -> dict[str, Any]:
+    for name in LOCAL_PROVIDER_CONFIG_ALIASES.get(canonical_name, (canonical_name,)):
+        value = _clean_text(stored.get(name))
+        if value:
+            return {
+                "value": value,
+                "source": "user_secrets",
+                "resolved_name": name,
+                "deprecated": name != canonical_name,
+                "deprecated_warning": _deprecated_warning(name, canonical_name) if name != canonical_name else "",
+            }
+    for name in LOCAL_PROVIDER_CONFIG_ALIASES.get(canonical_name, (canonical_name,)):
+        value = _clean_text(os.environ.get(name))
+        if value:
+            return {
+                "value": value,
+                "source": "env",
+                "resolved_name": name,
+                "deprecated": name != canonical_name,
+                "deprecated_warning": _deprecated_warning(name, canonical_name) if name != canonical_name else "",
+            }
+    return {
+        "value": "",
+        "source": "none",
+        "resolved_name": canonical_name,
+        "deprecated": False,
+        "deprecated_warning": "",
+    }
+
+
+def _deprecated_warnings(*records: Mapping[str, Any]) -> list[str]:
+    warnings: list[str] = []
+    for record in records:
+        warning = str(record.get("deprecated_warning") or "")
+        if warning:
+            warnings.append(warning)
+    return list(dict.fromkeys(warnings))
+
+
+def _validate_payload_keys(payload: Mapping[str, Any]) -> None:
+    allowed = set(ALLOWED_SECRET_KEYS) | set(ALLOWED_CONFIG_KEYS)
+    for key in payload:
+        normalized = str(key or "").strip()
+        lowered = normalized.lower()
+        if lowered in FORBIDDEN_PAYLOAD_KEYS or "authorization" in lowered:
+            raise ValueError("Forbidden secret field is not allowed in settings payload.")
+        if normalized not in allowed:
+            raise ValueError("Unsupported settings key is not allowed.")
+
+
+def _validate_config_value(name: str, value: Any) -> str | None:
+    text = _clean_text(value)
+    if not text:
+        return None
+    lowered = text.lower()
+    if any(marker in lowered for marker in ("authorization=", "access_token=", "api_key=", "apikey=", "token=", "secret=")):
+        raise ValueError(f"{name} must not contain raw endpoint secrets or token query parameters.")
+    return text
 
 
 def _provider_label(source: str) -> str:
@@ -59,17 +180,34 @@ def get_terminal_settings_status() -> dict[str, Any]:
     stored = _read_secrets()
     alpha_resolved = resolve_secret("SN_ALPHA_VANTAGE_KEY")
     news_resolved = resolve_secret("SN_NEWSAPI_KEY")
-    managed_resolved = resolve_secret("SN_MANAGED_DATA_PROXY_TOKEN")
+    local_provider_resolved = resolve_secret("SN_LOCAL_API_PROVIDER_TOKEN")
     tushare_resolved = resolve_secret("SN_TUSHARE_TOKEN")
     alpha = str(alpha_resolved.get("value") or "")
     news = str(news_resolved.get("value") or "")
-    managed_token = str(managed_resolved.get("value") or "")
-    managed_endpoint = str(stored.get("SN_MANAGED_DATA_PROXY_URL") or os.environ.get("SN_MANAGED_DATA_PROXY_URL") or "")
+    local_provider_token = str(local_provider_resolved.get("value") or "")
+    local_provider_base_url_record = _config_value(stored, "SN_LOCAL_API_PROVIDER_BASE_URL")
+    local_provider_enabled_record = _config_value(stored, "SN_LOCAL_API_PROVIDER_ENABLED")
+    local_provider_id_record = _config_value(stored, "SN_LOCAL_API_PROVIDER_ID")
+    local_provider_base_url = str(local_provider_base_url_record.get("value") or "")
+    local_provider_enabled_value = str(local_provider_enabled_record.get("value") or "")
+    local_provider_id = str(local_provider_id_record.get("value") or "custom_http_provider")
     tushare_token = str(tushare_resolved.get("value") or "")
     alpha_source = str(alpha_resolved.get("source") or "none")
     news_source = str(news_resolved.get("source") or "none")
-    managed_source = str(managed_resolved.get("source") or "none")
+    local_provider_source = str(local_provider_resolved.get("source") or "none")
     tushare_source = str(tushare_resolved.get("source") or "none")
+    local_provider_warnings = _deprecated_warnings(
+        local_provider_resolved,
+        local_provider_base_url_record,
+        local_provider_enabled_record,
+        local_provider_id_record,
+    )
+    local_provider_enabled = bool(
+        _is_truthy(local_provider_enabled_value)
+        or local_provider_token
+        or local_provider_base_url
+    )
+    local_provider_configured = bool(local_provider_token and local_provider_base_url)
     host = os.environ.get("SN_TERMINAL_HOST", "127.0.0.1")
     port = os.environ.get("SN_TERMINAL_PORT", "8765")
     api_base_url = os.environ.get("SN_TERMINAL_API_BASE_URL") or f"http://{host}:{port}"
@@ -78,25 +216,39 @@ def get_terminal_settings_status() -> dict[str, Any]:
         "success": True,
         "alpha_vantage_configured": bool(alpha),
         "newsapi_configured": bool(news),
-        "managed_data_proxy_configured": bool(managed_token),
-        "managed_data_proxy_endpoint_configured": bool(managed_endpoint),
+        "local_api_provider_enabled": local_provider_enabled,
+        "local_api_provider_configured": local_provider_configured,
+        "local_api_provider_token_configured": bool(local_provider_token),
+        "local_api_provider_base_url_configured": bool(local_provider_base_url),
+        "local_api_provider_id": local_provider_id,
+        "local_api_provider_id_source": str(local_provider_id_record.get("source") or "none"),
+        "local_api_provider_base_url": local_provider_base_url,
+        "local_api_provider_base_url_source": str(local_provider_base_url_record.get("source") or "none"),
+        "local_api_provider_token_masked": mask_secret(local_provider_token) if local_provider_token else "",
+        "local_api_provider_source": local_provider_source,
+        "local_api_provider_deprecated": bool(local_provider_warnings),
+        "local_api_provider_deprecated_warnings": local_provider_warnings,
+        "managed_data_proxy_configured": bool(local_provider_token),
+        "managed_data_proxy_endpoint_configured": bool(local_provider_base_url),
         "tushare_configured": bool(tushare_token),
         "alpha_vantage_masked": mask_secret(alpha) if alpha else "",
         "newsapi_masked": mask_secret(news) if news else "",
-        "managed_data_proxy_masked": mask_secret(managed_token) if managed_token else "",
-        "managed_data_proxy_endpoint": managed_endpoint,
+        "managed_data_proxy_masked": mask_secret(local_provider_token) if local_provider_token else "",
+        "managed_data_proxy_endpoint": local_provider_base_url,
         "tushare_masked": mask_secret(tushare_token) if tushare_token else "",
         "alpha_vantage_source": alpha_source,
         "newsapi_source": news_source,
-        "managed_data_proxy_source": managed_source,
+        "managed_data_proxy_source": local_provider_source,
         "tushare_source": tushare_source,
         "alpha_vantage_source_label_zh": _provider_label(alpha_source),
         "newsapi_source_label_zh": _provider_label(news_source),
-        "managed_data_proxy_source_label_zh": _provider_label(managed_source),
+        "local_api_provider_source_label_zh": _provider_label(local_provider_source),
+        "managed_data_proxy_source_label_zh": _provider_label(local_provider_source),
         "tushare_source_label_zh": _provider_label(tushare_source),
         "alpha_vantage_ui_message_zh": _provider_message(alpha_source, bool(alpha)),
         "newsapi_ui_message_zh": _provider_message(news_source, bool(news)),
-        "managed_data_proxy_ui_message_zh": _provider_message(managed_source, bool(managed_token)),
+        "local_api_provider_ui_message_zh": _provider_message(local_provider_source, bool(local_provider_token)),
+        "managed_data_proxy_ui_message_zh": _provider_message(local_provider_source, bool(local_provider_token)),
         "tushare_ui_message_zh": _provider_message(tushare_source, bool(tushare_token)),
         "config_path": str(secrets_path().parent),
         "user_data_dir": str(user_root),
@@ -120,6 +272,7 @@ def _validate_secret(name: str, value: Any) -> str | None:
 
 def save_terminal_secrets(payload: Mapping[str, Any]) -> dict[str, Any]:
     initialize_user_data_dir()
+    _validate_payload_keys(payload)
     existing = _read_secrets()
     updates: dict[str, str] = {}
     for name in ALLOWED_SECRET_KEYS:
@@ -127,14 +280,14 @@ def save_terminal_secrets(payload: Mapping[str, Any]) -> dict[str, Any]:
             continue
         value = _validate_secret(name, payload.get(name))
         if value is not None:
-            updates[name] = value
+            updates[_canonical_secret_key(name)] = value
     config_updates: dict[str, str] = {}
     for name in ALLOWED_CONFIG_KEYS:
         if name not in payload:
             continue
-        text = str(payload.get(name) or "").strip()
+        text = _validate_config_value(name, payload.get(name))
         if text:
-            config_updates[name] = text
+            config_updates[_canonical_config_key(name)] = text
     if not updates and not config_updates:
         return {
             **get_terminal_settings_status(),
@@ -169,6 +322,8 @@ def save_terminal_secrets(payload: Mapping[str, Any]) -> dict[str, Any]:
 def reset_terminal_secrets() -> dict[str, Any]:
     initialize_user_data_dir()
     for name in ALLOWED_SECRET_KEYS:
+        os.environ.pop(name, None)
+    for name in ALLOWED_CONFIG_KEYS:
         os.environ.pop(name, None)
     restored = restore_private_bundle_defaults()
     status = get_terminal_settings_status()
@@ -233,6 +388,8 @@ def get_key_diagnostics() -> dict[str, Any]:
             "source": source,
             "source_label_zh": _provider_label(source),
             "masked": str(resolved.get("masked") or ""),
+            "deprecated": bool(resolved.get("deprecated")),
+            "deprecated_warning": str(resolved.get("deprecated_warning") or ""),
             "can_read": configured,
             "last_validation_status": _validation_status(provider) if configured else "not_tested",
             "ui_message_zh": _provider_message(source, configured),
@@ -243,6 +400,7 @@ def get_key_diagnostics() -> dict[str, Any]:
         "success": True,
             "alpha_vantage": row("SN_ALPHA_VANTAGE_KEY", "alpha_vantage"),
             "newsapi": row("SN_NEWSAPI_KEY", "newsapi"),
+            "local_api_provider": row("SN_LOCAL_API_PROVIDER_TOKEN", "managed_proxy"),
             "managed_proxy": row("SN_MANAGED_DATA_PROXY_TOKEN", "managed_proxy"),
             "tushare": row("SN_TUSHARE_TOKEN", "tushare"),
         "message_zh": "key 诊断只返回来源和脱敏状态，不返回完整 key。",

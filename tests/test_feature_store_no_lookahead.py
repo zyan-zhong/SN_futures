@@ -19,7 +19,7 @@ def _write_market(root: str) -> None:
     output = Path(root) / "outputs"
     output.mkdir(parents=True, exist_ok=True)
     rows = []
-    for idx, day in enumerate(pd.date_range("2026-01-01", periods=10, freq="D")):
+    for idx, day in enumerate(pd.date_range("2026-01-01", periods=80, freq="D")):
         close = 200000.0 + idx * 100.0
         rows.append(
             {

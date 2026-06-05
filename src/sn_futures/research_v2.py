@@ -211,6 +211,14 @@ def build_data_watermark(raw: pd.DataFrame, live_snapshot: dict[str, Any] | None
                 "quote_time": str((live_snapshot or {}).get("generated_at", "")),
                 "from_cache": any(bool(row.get("from_cache")) for row in statuses if isinstance(row, dict) and row.get("name") == "sina_finance"),
             }
+    sample_data_used = bool(
+        latest_row.get("sample_data_used")
+        or latest_row.get("sample")
+        or latest_row.get("sample_mode")
+        or (live_snapshot or {}).get("sample")
+        or (live_snapshot or {}).get("sample_mode")
+    )
+    baseline_used = bool(latest_row.get("baseline_used") or (live_snapshot or {}).get("baseline_used"))
     payload = {
         "created_at": _now_iso(),
         "latest_daily": latest_daily,
@@ -221,7 +229,9 @@ def build_data_watermark(raw: pd.DataFrame, live_snapshot: dict[str, Any] | None
         "requested_history_symbol": str(meta.get("requested_history_symbol", "") if isinstance(meta, dict) else ""),
         "source_mode": source_mode,
         "using_fallback": "fallback" in source_mode.lower(),
-        "is_real_data_only": not any(str(latest_row.get("data_source_mode", "")).startswith(mode) for mode in ("demo", "synthetic")),
+        "is_real_data_only": bool(latest_daily or live_quote) and not sample_data_used and not baseline_used and not any(str(latest_row.get("data_source_mode", "")).startswith(mode) for mode in ("demo", "synthetic")),
+        "sample_data_used": sample_data_used,
+        "baseline_used": baseline_used,
         "demo_blocked_reason": "实盘模式禁止使用演示数据；真实数据失败时仅显示失败原因和缓存状态。",
         "minute_data_available": minute_data_available,
         "source_status": statuses,
@@ -229,6 +239,10 @@ def build_data_watermark(raw: pd.DataFrame, live_snapshot: dict[str, Any] | None
         "rate_limit_policy": (live_snapshot or {}).get("rate_limit_policy", {}) if isinstance(live_snapshot, dict) else {},
         "live_quote": live_quote,
         "live_overlay_used": bool(live_quote),
+        "history_immutable": True,
+        "live_overlay_used_for_display_only": bool(live_quote),
+        "live_overlay_used_for_training": False,
+        "live_overlay_used_for_backtest": False,
         "contract_selection_reason": str(meta.get("selection_rule", "") if isinstance(meta, dict) else ""),
         "disclaimer": DISCLAIMER,
     }

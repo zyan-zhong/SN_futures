@@ -2201,3 +2201,38 @@ def build_terminal_data_status() -> dict[str, Any]:  # type: ignore[override]
     payload["provider_status_source"] = "provider_status_canonical.json"
     payload["report_time"] = canonical.get("generated_at") if isinstance(canonical, Mapping) else _now()
     return sanitize_for_json(payload)
+
+
+_TERMINAL_DATA_STATUS_PROVENANCE_PREVIOUS = build_terminal_data_status
+
+
+def build_terminal_data_status() -> dict[str, Any]:  # type: ignore[override]
+    payload = _TERMINAL_DATA_STATUS_PROVENANCE_PREVIOUS()
+    try:
+        from .provenance_gate_service import build_runtime_provenance_report
+
+        provenance = build_runtime_provenance_report()
+    except Exception:
+        return sanitize_for_json(payload)
+
+    gates = provenance.get("gates") if isinstance(provenance.get("gates"), Mapping) else {}
+    prediction_gate = gates.get("prediction") if isinstance(gates.get("prediction"), Mapping) else {}
+    data_watermark = payload.get("data_watermark") if isinstance(payload, Mapping) and isinstance(payload.get("data_watermark"), Mapping) else {}
+    watermark = dict(data_watermark)
+    watermark["provenance_schema_version"] = provenance.get("schema_version")
+    watermark["provenance_records"] = provenance.get("records", [])
+    watermark["provenance_gates"] = gates
+    watermark["provenance_gate"] = prediction_gate
+    watermark["allowed_for_display"] = bool(gates.get("display", {}).get("allowed_for_display")) if isinstance(gates.get("display"), Mapping) else False
+    watermark["allowed_for_feature_store"] = bool(gates.get("feature_store", {}).get("allowed_for_feature_store")) if isinstance(gates.get("feature_store"), Mapping) else False
+    watermark["allowed_for_training"] = bool(gates.get("training", {}).get("allowed_for_training")) if isinstance(gates.get("training"), Mapping) else False
+    watermark["allowed_for_prediction"] = bool(prediction_gate.get("allowed_for_prediction")) if isinstance(prediction_gate, Mapping) else False
+    watermark["allowed_for_backtest"] = bool(gates.get("backtest", {}).get("allowed_for_backtest")) if isinstance(gates.get("backtest"), Mapping) else False
+    existing_reasons = watermark.get("blocking_reasons") if isinstance(watermark.get("blocking_reasons"), list) else []
+    gate_reasons = prediction_gate.get("blocking_reasons") if isinstance(prediction_gate.get("blocking_reasons"), list) else []
+    watermark["blocking_reasons"] = list(dict.fromkeys([str(reason) for reason in [*existing_reasons, *gate_reasons] if str(reason)]))
+    result = dict(payload) if isinstance(payload, Mapping) else {}
+    result["data_watermark"] = watermark
+    result["provenance_gate"] = prediction_gate
+    result["provenance_schema_version"] = provenance.get("schema_version")
+    return sanitize_for_json(result)

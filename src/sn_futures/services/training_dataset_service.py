@@ -12,6 +12,7 @@ import pandas as pd
 from ..api.json_utils import sanitize_for_json
 from ..features_core.pipeline import build_feature_matrix
 from ..labels.forward_return import add_forward_return_labels, forward_label_columns
+from ..labels.horizons import INTRADAY_HORIZONS, LABEL_VERSION, LabelSpec, label_spec_to_dict, normalise_label_specs
 from ..labels.leakage_guard import LABEL_PREFIXES, check_feature_label_leakage, infer_label_columns
 from ..labels.triple_barrier import add_triple_barrier_labels
 from ..runtime import get_user_output_dir
@@ -20,6 +21,7 @@ from .feature_store_service import build_feature_store, load_feature_store
 
 
 DEFAULT_HORIZONS = (1, 3, 5, 10, 20)
+MIN_SAMPLES_PER_HORIZON = 30
 FORBIDDEN_FEATURE_PATTERNS = (
     "ret_",
     "direction_",
@@ -120,7 +122,7 @@ def _safe_feature_cols(feature_df: pd.DataFrame, usable_cols: Iterable[str], min
     forbidden = set(infer_label_columns(candidates))
     safe: list[str] = []
     for col in candidates:
-        if col in forbidden or str(col).startswith(FORBIDDEN_FEATURE_PATTERNS):
+        if col in forbidden or str(col).startswith(FORBIDDEN_FEATURE_PATTERNS) or _is_feature_time_column(str(col)):
             continue
         non_null_rate = float(feature_df[col].notna().mean()) if len(feature_df) else 0.0
         if non_null_rate >= float(min_feature_coverage):
@@ -143,6 +145,55 @@ def _usable_existing_cols(frame: pd.DataFrame, columns: Iterable[str], min_featu
 def _label_end_times(index: pd.Index, horizon: int) -> pd.Series:
     values = pd.Series(index, index=index).shift(-int(horizon))
     return pd.to_datetime(values, errors="coerce")
+
+
+def _future_window(series: pd.Series, horizon: int) -> pd.DataFrame:
+    return pd.concat([series.shift(-step) for step in range(1, int(horizon) + 1)], axis=1)
+
+
+def _direction_from_return(ret: pd.Series, neutral_band: float) -> pd.Series:
+    values = np.select([ret > float(neutral_band), ret < -float(neutral_band)], [1, -1], default=0)
+    out = pd.Series(values, index=ret.index, dtype="Int64")
+    out[ret.isna()] = pd.NA
+    return out
+
+
+def _label_frame_for_spec(frame: pd.DataFrame, spec: LabelSpec) -> pd.DataFrame:
+    bars = int(spec.required_future_bars)
+    close = pd.to_numeric(frame["close"], errors="coerce")
+    one_step_returns = close.pct_change(fill_method=None)
+    future_close = close.shift(-bars)
+    target_return = future_close / close - 1.0
+    future_vol = _future_window(one_step_returns, bars).std(axis=1, skipna=True)
+    insufficient_tail = future_close.isna()
+    future_vol[insufficient_tail] = np.nan
+    volatility_adjusted = target_return / future_vol.replace(0.0, np.nan)
+    label_available_at = _label_end_times(frame.index, bars)
+    return pd.DataFrame(
+        {
+            "target_return": target_return,
+            "direction_label": _direction_from_return(target_return, spec.neutral_band),
+            "volatility_adjusted_label": volatility_adjusted,
+            "label_available_at": label_available_at.astype(str),
+            "required_future_bars": bars,
+        },
+        index=frame.index,
+    )
+
+
+def _is_feature_time_column(column: str) -> bool:
+    value = str(column).lower()
+    return value in {"feature_time", "label_available_at", "label_end_time"} or value.endswith(("_timestamp", "_available_at"))
+
+
+def _median_index_step_seconds(index: pd.Index) -> float | None:
+    values = pd.DatetimeIndex(pd.to_datetime(index, errors="coerce")).dropna().sort_values()
+    if len(values) < 2:
+        return None
+    diffs = values.to_series().diff().dropna().dt.total_seconds()
+    if diffs.empty:
+        return None
+    return float(diffs.median())
 
 
 def _add_research_tb_labels(frame: pd.DataFrame, horizon: int) -> pd.DataFrame:
@@ -242,9 +293,8 @@ def _build_training_dataset_from_feature_store(
     if not feature_cols:
         raise ValueError("Feature Store v3 没有满足覆盖率和泄漏检查的真实特征列，未构建训练数据。")
 
-    label_base = frame.copy()
-    labelled = add_forward_return_labels(label_base, horizons=horizons)
-    label_cols = forward_label_columns(horizons)
+    label_specs = normalise_label_specs(horizons)
+    label_cols = ["target_return", "direction_label", "volatility_adjusted_label", "label_available_at"]
     removed_label_cols = sorted(set(infer_label_columns(list(frame.columns) + label_cols)))
     leakage = check_feature_label_leakage(feature_cols, label_cols)
     forbidden_leaks = [col for col in feature_cols if str(col).startswith(FORBIDDEN_FEATURE_PATTERNS)]
@@ -255,28 +305,95 @@ def _build_training_dataset_from_feature_store(
     label_distribution_by_horizon: dict[str, dict[str, int]] = {}
     return_summary_by_horizon: dict[str, dict[str, float | None]] = {}
     dataset_paths: dict[str, str] = {}
+    class_distribution: dict[str, dict[str, int]] = {}
+    horizon_manifests: dict[str, dict[str, Any]] = {}
+    datasets_to_write: dict[str, pd.DataFrame] = {}
+    blocked_reasons: list[str] = []
+    median_step_seconds = _median_index_step_seconds(frame.index)
 
-    combined = pd.concat([frame[feature_cols], labelled[label_cols]], axis=1)
-    for horizon in horizons:
-        h = int(horizon)
-        suffix = f"{h}d"
-        ret_col = f"ret_{suffix}"
-        direction_col = f"direction_{suffix}"
-        label_end = _label_end_times(combined.index, h)
+    for spec in label_specs:
+        h = int(spec.required_future_bars)
+        suffix = spec.horizon
+        labels = _label_frame_for_spec(frame, spec)
         tb_source = frame.copy()
         tb = _add_research_tb_labels(tb_source, h)
-        dataset = pd.concat([combined[feature_cols + [ret_col, direction_col]], tb], axis=1)
-        dataset["y_direction"] = dataset[direction_col]
-        dataset["y_return"] = dataset[ret_col]
+        dataset = pd.concat([frame[feature_cols], labels, tb], axis=1)
+        dataset["y_direction"] = dataset["direction_label"]
+        dataset["y_return"] = dataset["target_return"]
         dataset["label_start_time"] = dataset.index.astype(str)
-        dataset["label_end_time"] = label_end.astype(str)
+        dataset["feature_time"] = dataset["label_start_time"]
+        dataset["label_end_time"] = dataset["label_available_at"]
         dataset["horizon"] = suffix
-        dataset = dataset.dropna(subset=["y_direction", "y_return", "label_end_time"])
+        dataset = dataset.dropna(subset=["y_direction", "y_return", "label_end_time", "label_available_at"])
         dataset = dataset[dataset["label_end_time"].astype(str).str.lower() != "nat"]
-        path, fmt = _write_dataset(dataset.reset_index(drop=True), _dataset_dir(dataset_version) / f"train_{suffix}")
+        sample_count = int(len(dataset))
         sample_count_by_horizon[suffix] = int(len(dataset))
         label_distribution_by_horizon[suffix] = _distribution(dataset["y_direction"])
+        class_distribution[suffix] = label_distribution_by_horizon[suffix]
         return_summary_by_horizon[suffix] = _return_summary(dataset["y_return"])
+        horizon_blocked: list[str] = []
+        if spec.horizon in INTRADAY_HORIZONS and (median_step_seconds is None or median_step_seconds > 3600):
+            horizon_blocked.append("intraday_horizon_requires_intraday_bars")
+        if sample_count < MIN_SAMPLES_PER_HORIZON:
+            horizon_blocked.append(f"insufficient_samples:{sample_count}<{MIN_SAMPLES_PER_HORIZON}")
+        if not leakage_check_pass:
+            horizon_blocked.append("leakage_check_failed")
+        horizon_manifests[suffix] = {
+            "feature_store_version": feature_store_version,
+            "label_version": LABEL_VERSION,
+            "horizon": suffix,
+            "sample_count": sample_count,
+            "train_start": str(dataset["label_start_time"].min()) if not dataset.empty else "",
+            "train_end": str(dataset["label_start_time"].max()) if not dataset.empty else "",
+            "embargo_days": h,
+            "bar_interval_seconds_median": median_step_seconds,
+            "purged_split_config": {
+                "method": "purged_walk_forward_ready",
+                "purge_window_bars": h,
+                "embargo_days": h,
+                "train_fraction": 0.8,
+                "validation_fraction": 0.2,
+            },
+            "class_distribution": class_distribution[suffix],
+            "leakage_check_pass": leakage_check_pass and not horizon_blocked,
+            "blocked_reasons": horizon_blocked,
+        }
+        blocked_reasons.extend([f"{suffix}:{reason}" for reason in horizon_blocked])
+        datasets_to_write[suffix] = dataset.reset_index(drop=True)
+
+    if blocked_reasons:
+        manifest = {
+            "generated_at": datetime.now().isoformat(timespec="seconds"),
+            "dataset_version": dataset_version,
+            "feature_store_version": feature_store_version,
+            "feature_set": feature_set,
+            "label_version": LABEL_VERSION,
+            "status": "blocked",
+            "message_zh": "训练数据集样本不足或泄漏检查未通过，未写入可训练数据集。",
+            "manifest_path": str(_manifest_path(dataset_version)),
+            "horizons": [spec.horizon for spec in label_specs],
+            "label_specs": {spec.horizon: label_spec_to_dict(spec) for spec in label_specs},
+            "horizon_manifests": horizon_manifests,
+            "sample_count_by_horizon": sample_count_by_horizon,
+            "class_distribution": class_distribution,
+            "feature_cols": feature_cols,
+            "label_cols": label_cols,
+            "leakage_check_pass": False,
+            "blocked_reasons": sorted(set(blocked_reasons)),
+            "dataset_paths": {},
+            "dataset_outputs": {},
+            "sample_data_used": False,
+            "mock_data_used": False,
+            "baseline_used": False,
+            "customer_prediction_generated": False,
+            "active_model_written": False,
+        }
+        payload = sanitize_for_json(manifest)
+        _manifest_path(dataset_version).write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        return payload
+
+    for suffix, dataset in datasets_to_write.items():
+        path, fmt = _write_dataset(dataset, _dataset_dir(dataset_version) / f"train_{suffix}")
         dataset_paths[suffix] = path
         dataset_outputs[suffix] = {
             "path": path,
@@ -297,12 +414,15 @@ def _build_training_dataset_from_feature_store(
         "dataset_version": dataset_version,
         "feature_store_version": feature_store_version,
         "feature_set": feature_set,
+        "label_version": LABEL_VERSION,
         "status": "success",
         "message_zh": "训练数据 v3 已基于 Feature Store 构建。本步骤未训练模型、未生成预测、未发布 active。",
         "manifest_path": str(_manifest_path(dataset_version)),
-        "horizons": [int(h) for h in horizons],
+        "horizons": [spec.horizon for spec in label_specs],
+        "label_specs": {spec.horizon: label_spec_to_dict(spec) for spec in label_specs},
+        "horizon_manifests": horizon_manifests,
         "feature_cols": feature_cols,
-        "label_cols": label_cols + [f"tb_label_{int(h)}d" for h in horizons],
+        "label_cols": sorted(set(label_cols + [f"tb_label_{int(spec.required_future_bars)}d" for spec in label_specs])),
         "removed_label_cols": removed_label_cols,
         "forbidden_feature_patterns": list(FORBIDDEN_FEATURE_PATTERNS),
         "leakage_check_pass": leakage_check_pass,
@@ -315,6 +435,7 @@ def _build_training_dataset_from_feature_store(
         "mock_data_used": False,
         "baseline_used": False,
         "sample_count_by_horizon": sample_count_by_horizon,
+        "class_distribution": class_distribution,
         "feature_count": len(feature_cols),
         "date_start": frame.index.min().isoformat(),
         "date_end": frame.index.max().isoformat(),
@@ -326,6 +447,8 @@ def _build_training_dataset_from_feature_store(
         "feature_store_manifest_path": str(feature_store_manifest.get("manifest_path") or ""),
         "dataset_paths": dataset_paths,
         "dataset_outputs": dataset_outputs,
+        "blocked_reasons": [],
+        "no_model_training": True,
         "cross_market_feature_cols": cross_market_cols,
         "cross_market_excluded_reason": "" if cross_market_cols else "no_usable_feature_store_cross_market_fields",
         "event_feature_cols": event_cols,

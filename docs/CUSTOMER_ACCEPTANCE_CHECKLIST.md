@@ -23,6 +23,18 @@
 - [x] 设置页只显示脱敏 key。
 - [x] 密钥仅保存在本机用户目录，不写入前端，不上传。
 
+## 发行前最终质量门禁
+
+- [ ] 数据源配置：Alpha Vantage / NewsAPI / Tushare / Local API Provider key 未配置时显示“未配置”，已配置时只显示脱敏值。
+- [ ] 一键刷新：触发后只通过 provider/API 拉取真实数据；失败时显示失败原因、cache/stale 状态，不要求用户手动导入。
+- [ ] 数据状态：展示 runtime root、source、as_of、fetched_at、cache_status、stale_status、blocking_reasons 和数据水位。
+- [ ] 新闻/政策事件：区分 fetched_at、source_published_at、available_at；无发布时间的政策页不得作为高权重事件入模。
+- [ ] Feature Store gate：sample/demo/baseline/display_overlay/live_quote 不得进入训练特征；不满足 point-in-time 时返回 blocked。
+- [ ] 预测原因：无 active model、数据缺失、stale cache、sample_data_used 或 baseline_used 时只显示 blocked card，不生成伪预测。
+- [ ] 回测原因：无真实历史 bars、无 signal manifest、sample_data_used 或 baseline_used 时 blocked，不生成 equity curve。
+- [ ] 报告免责声明：所有报告、预测、回测和风险情景输出均清晰标注“研究参考，不构成投资建议”。
+- [ ] 发行包排除：`.env`、`secrets.json`、private keys、runtime cache、SQLite、logs、outputs、e2e screenshots 和安装包构建产物不进入源码仓库或安装包。
+
 ## 终端页面
 
 - [x] Dashboard 显示系统状态。

@@ -78,3 +78,25 @@ NewsAPI 成功但没有高相关新闻时，不会伪造事件因子；前端显
 ## 当前限制
 
 如果 Alpha Vantage 返回限流，系统会显示 `rate_limited`，不会再误显示 `key_missing`。如果 NewsAPI 未在用户目录或环境变量中配置，仍会显示未配置；用户可在设置页重新保存 key 后验证。
+## Local API Provider Naming
+
+Canonical local provider variables:
+
+- `SN_ALPHA_VANTAGE_KEY`
+- `SN_NEWSAPI_KEY`
+- `SN_TUSHARE_TOKEN`
+- `SN_LOCAL_API_PROVIDER_ENABLED`
+- `SN_LOCAL_API_PROVIDER_ID`
+- `SN_LOCAL_API_PROVIDER_BASE_URL`
+- `SN_LOCAL_API_PROVIDER_TOKEN`
+
+Legacy managed proxy variables are backward-compatible aliases only:
+
+- `SN_MANAGED_PROXY_TOKEN` -> `SN_LOCAL_API_PROVIDER_TOKEN`
+- `SN_MANAGED_DATA_PROXY_TOKEN` -> `SN_LOCAL_API_PROVIDER_TOKEN`
+- `SN_MANAGED_PROXY_BASE_URL` -> `SN_LOCAL_API_PROVIDER_BASE_URL`
+- `SN_MANAGED_DATA_PROXY_URL` -> `SN_LOCAL_API_PROVIDER_BASE_URL`
+- `SN_MANAGED_PROXY_ENABLED` -> `SN_LOCAL_API_PROVIDER_ENABLED`
+- `SN_MANAGED_DATA_PROXY_ENABLED` -> `SN_LOCAL_API_PROVIDER_ENABLED`
+
+Settings and diagnostics APIs must return only `configured`, `source`, `masked`, and deprecated warnings. They must not return complete keys, Authorization headers, endpoint secrets, or bearer tokens. Empty submitted values do not overwrite existing local secrets.

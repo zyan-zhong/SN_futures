@@ -256,6 +256,18 @@ export interface TerminalSnapshot {
 export interface TerminalSettingsStatus {
   alpha_vantage_configured?: boolean;
   newsapi_configured?: boolean;
+  local_api_provider_enabled?: boolean;
+  local_api_provider_configured?: boolean;
+  local_api_provider_token_configured?: boolean;
+  local_api_provider_base_url_configured?: boolean;
+  local_api_provider_id?: string;
+  local_api_provider_id_source?: string;
+  local_api_provider_base_url?: string;
+  local_api_provider_base_url_source?: string;
+  local_api_provider_token_masked?: string;
+  local_api_provider_source?: string;
+  local_api_provider_deprecated?: boolean;
+  local_api_provider_deprecated_warnings?: string[];
   managed_data_proxy_configured?: boolean;
   managed_data_proxy_endpoint_configured?: boolean;
   tushare_configured?: boolean;
@@ -270,10 +282,12 @@ export interface TerminalSettingsStatus {
   tushare_source?: string;
   alpha_vantage_source_label_zh?: string;
   newsapi_source_label_zh?: string;
+  local_api_provider_source_label_zh?: string;
   managed_data_proxy_source_label_zh?: string;
   tushare_source_label_zh?: string;
   alpha_vantage_ui_message_zh?: string;
   newsapi_ui_message_zh?: string;
+  local_api_provider_ui_message_zh?: string;
   managed_data_proxy_ui_message_zh?: string;
   tushare_ui_message_zh?: string;
   config_path?: string;
@@ -292,6 +306,8 @@ export interface KeyDiagnosticsItem {
   source?: string;
   source_label_zh?: string;
   masked?: string;
+  deprecated?: boolean;
+  deprecated_warning?: string;
   can_read?: boolean;
   last_validation_status?: string;
   ui_message_zh?: string;
@@ -302,6 +318,7 @@ export interface KeyDiagnosticsPayload {
   success?: boolean;
   alpha_vantage?: KeyDiagnosticsItem;
   newsapi?: KeyDiagnosticsItem;
+  local_api_provider?: KeyDiagnosticsItem;
   managed_proxy?: KeyDiagnosticsItem;
   tushare?: KeyDiagnosticsItem;
   message_zh?: string;

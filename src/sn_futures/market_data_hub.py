@@ -782,51 +782,51 @@ def apply_live_snapshot_overlay(
     if not quotes.empty and "latest" in quotes.columns:
         valid_quotes = quotes[pd.to_numeric(quotes["latest"], errors="coerce").notna()].copy()
 
-    overlay_info: dict[str, Any] = {}
-    if not valid_quotes.empty:
-        contract_meta = live_snapshot.get("contract_meta", {}) if isinstance(live_snapshot, dict) else {}
-        preferred_symbol = str(contract_meta.get("active_contract_symbol", "") or contract_meta.get("target_contract_symbol", "") or "")
-        preferred = valid_quotes[valid_quotes["symbol"] == preferred_symbol] if preferred_symbol else pd.DataFrame()
-        quote_row = preferred.iloc[0] if not preferred.empty else valid_quotes.iloc[0]
-        live_latest = float(quote_row.get("latest", 0.0) or 0.0)
-        last_close = float(work["close"].iloc[-1]) if "close" in work.columns else 0.0
-        if live_latest > 0 and last_close > 0:
-            scale = live_latest / last_close
-            for col in ("open", "high", "low", "close", "spot_price"):
-                if col in work.columns:
-                    work[col] = pd.to_numeric(work[col], errors="coerce") * scale
-            overlay_info.update(
-                {
-                    "quote_symbol": str(quote_row.get("symbol", "")),
-                    "quote_name": str(quote_row.get("name", "")),
-                    "live_latest": live_latest,
-                    "scale_factor": scale,
-                }
-            )
-        last_idx = work.index[-1]
-        for col, src in (("volume", "volume"), ("open_interest", "open_interest")):
-            value = quote_row.get(src)
-            if col in work.columns and value not in (None, ""):
-                numeric = pd.to_numeric(pd.Series([value]), errors="coerce").iloc[0]
-                if pd.notna(numeric) and float(numeric) > 0:
-                    work.at[last_idx, col] = float(numeric)
+    if valid_quotes.empty:
+        return work
 
-    macro_summary = live_snapshot.get("macro_summary", {})
-    if isinstance(macro_summary, dict):
-        last_idx = work.index[-1]
-        if "usd_cny" in work.columns and macro_summary.get("usd_cny") not in (None, ""):
-            work.at[last_idx, "usd_cny"] = float(macro_summary["usd_cny"])
-        if "us10y" in work.columns and macro_summary.get("us10y") not in (None, ""):
-            work.at[last_idx, "us10y"] = float(macro_summary["us10y"])
+    contract_meta = live_snapshot.get("contract_meta", {}) if isinstance(live_snapshot, dict) else {}
+    preferred_symbol = str(contract_meta.get("active_contract_symbol", "") or contract_meta.get("target_contract_symbol", "") or "")
+    preferred = valid_quotes[valid_quotes["symbol"] == preferred_symbol] if preferred_symbol and "symbol" in valid_quotes.columns else pd.DataFrame()
+    quote_row = preferred.iloc[0] if not preferred.empty else valid_quotes.iloc[0]
+    numeric_latest = pd.to_numeric(pd.Series([quote_row.get("latest")]), errors="coerce").iloc[0]
+    if pd.isna(numeric_latest) or float(numeric_latest) <= 0:
+        return work
 
-    if overlay_info:
-        work.attrs["live_overlay"] = overlay_info
-        if "data_source_mode" in work.columns:
-            current_mode = str(work["data_source_mode"].iloc[-1] or "").strip()
-            merged_mode = f"{current_mode}+live_quote_overlay" if current_mode else "live_quote_overlay"
-            work["data_source_mode"] = merged_mode
-        else:
-            work["data_source_mode"] = "live_quote_overlay"
+    live_latest = float(numeric_latest)
+    quote_time = str(live_snapshot.get("generated_at", ""))
+    symbol = str(quote_row.get("symbol", ""))
+    name = str(quote_row.get("name", ""))
+    latest_quote: dict[str, Any] = {
+        "symbol": symbol,
+        "name": name,
+        "latest": live_latest,
+        "quote_time": quote_time,
+        "source": "live_snapshot",
+    }
+    for key in ("prev_close", "volume", "open_interest"):
+        value = quote_row.get(key)
+        numeric = pd.to_numeric(pd.Series([value]), errors="coerce").iloc[0]
+        if pd.notna(numeric):
+            latest_quote[key] = float(numeric)
+
+    work.attrs["live_overlay"] = {
+        "history_immutable": True,
+        "live_overlay_used_for_display_only": True,
+        "live_overlay_used_for_training": False,
+        "live_overlay_used_for_backtest": False,
+        "quote_symbol": symbol,
+        "quote_name": name,
+        "live_latest": live_latest,
+        "latest_quote": latest_quote,
+        "display_overlay": {
+            "type": "latest_quote_marker",
+            "price": live_latest,
+            "quote_time": quote_time,
+            "symbol": symbol,
+            "source": "live_snapshot",
+        },
+    }
     return work
 
 

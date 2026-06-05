@@ -138,6 +138,27 @@ def get_data_watermark_report() -> dict[str, Any]:
         "candidate": payload.get("candidate_updated_at") or "missing",
         "backtest": payload.get("backtest_updated_at") or "missing",
     }
+    try:
+        from .provenance_gate_service import build_runtime_provenance_report
+
+        provenance = build_runtime_provenance_report(output_dir, aggregate_watermark=payload)
+        gates = provenance.get("gates") if isinstance(provenance.get("gates"), dict) else {}
+        prediction_gate = gates.get("prediction") if isinstance(gates.get("prediction"), dict) else {}
+        payload["provenance_schema_version"] = provenance.get("schema_version")
+        payload["provenance_records"] = provenance.get("records", [])
+        payload["provenance_gates"] = gates
+        payload["provenance_gate"] = prediction_gate
+        payload["allowed_for_display"] = bool(gates.get("display", {}).get("allowed_for_display")) if isinstance(gates.get("display"), dict) else False
+        payload["allowed_for_feature_store"] = bool(gates.get("feature_store", {}).get("allowed_for_feature_store")) if isinstance(gates.get("feature_store"), dict) else False
+        payload["allowed_for_training"] = bool(gates.get("training", {}).get("allowed_for_training")) if isinstance(gates.get("training"), dict) else False
+        payload["allowed_for_prediction"] = bool(prediction_gate.get("allowed_for_prediction")) if isinstance(prediction_gate, dict) else False
+        payload["allowed_for_backtest"] = bool(gates.get("backtest", {}).get("allowed_for_backtest")) if isinstance(gates.get("backtest"), dict) else False
+        payload["sample_data_used"] = bool(provenance.get("sample_data_used"))
+        payload["baseline_used"] = bool(provenance.get("baseline_used"))
+        payload["blocking_reasons"] = prediction_gate.get("blocking_reasons", []) if isinstance(prediction_gate.get("blocking_reasons"), list) else []
+    except Exception:
+        payload.setdefault("provenance_records", [])
+        payload.setdefault("provenance_gates", {})
     if payload.get("provider_watermarks_synced_at"):
         _write_watermark(payload)
     return sanitize_for_json(sanitize_mapping(payload))

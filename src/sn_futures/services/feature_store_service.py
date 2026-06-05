@@ -17,6 +17,7 @@ from .cross_market_feature_join_service import (
     MAX_FORWARD_FILL_TRADING_DAYS,
     build_cross_market_feature_frame,
 )
+from .provenance_gate_service import build_runtime_provenance_report
 
 
 RAW_MARKET_FIELDS = ("open", "high", "low", "close", "volume", "open_interest")
@@ -49,6 +50,9 @@ FORBIDDEN_FEATURE_PREFIXES = (
     "max_adverse_excursion_",
     "tb_",
 )
+FEATURE_STORE_PRIMARY_VERSION = "v3"
+FEATURE_STORE_TIMEZONE = "Asia/Hong_Kong"
+EVENT_AVAILABLE_AT_JOIN_RULE = "exact trade_date join only when available_at <= trade_date 23:59:59 Asia/Hong_Kong"
 
 
 def _output_dir() -> Path:
@@ -144,7 +148,7 @@ def _load_market_frame(output_dir: Path) -> tuple[pd.DataFrame, dict[str, Any]]:
 def _event_input_rows(payload: Any) -> tuple[list[Mapping[str, Any]], str]:
     if not isinstance(payload, Mapping):
         return [], "missing_news_data"
-    rows = payload.get("inputs") or payload.get("events") or []
+    rows = payload.get("inputs") or payload.get("events") or payload.get("rows") or []
     if not isinstance(rows, list):
         return [], "missing_news_data"
     usable = [
@@ -157,6 +161,38 @@ def _event_input_rows(payload: Any) -> tuple[list[Mapping[str, Any]], str]:
     if not usable:
         return [], "no_used_in_model_event_inputs"
     return usable, ""
+
+
+def _event_trade_day_cutoff(day: pd.Timestamp) -> pd.Timestamp:
+    normalized = pd.Timestamp(day).normalize()
+    if normalized.tzinfo is None:
+        normalized = normalized.tz_localize(FEATURE_STORE_TIMEZONE)
+    else:
+        normalized = normalized.tz_convert(FEATURE_STORE_TIMEZONE)
+    return normalized + pd.Timedelta(days=1) - pd.Timedelta(seconds=1)
+
+
+def _parse_available_at(value: Any) -> pd.Timestamp | None:
+    if value is None or value == "":
+        return None
+    parsed = pd.to_datetime(value, errors="coerce")
+    if pd.isna(parsed):
+        return None
+    timestamp = pd.Timestamp(parsed)
+    if timestamp.tzinfo is None:
+        return timestamp.tz_localize(FEATURE_STORE_TIMEZONE)
+    return timestamp.tz_convert(FEATURE_STORE_TIMEZONE)
+
+
+def _event_visible_for_trade_day(row: Mapping[str, Any], day: pd.Timestamp) -> tuple[bool, str]:
+    if "available_at" not in row or row.get("available_at") in {None, ""}:
+        return True, "available_at_missing_legacy_allowed"
+    available_at = _parse_available_at(row.get("available_at"))
+    if available_at is None:
+        return False, "invalid_available_at"
+    if available_at > _event_trade_day_cutoff(day):
+        return False, "available_at_after_trade_date_cutoff"
+    return True, ""
 
 
 def _build_event_frame(market_index: pd.DatetimeIndex, output_dir: Path) -> tuple[pd.DataFrame, dict[str, Any]]:
@@ -173,6 +209,10 @@ def _build_event_frame(market_index: pd.DatetimeIndex, output_dir: Path) -> tupl
             "status": empty_reason,
             "row_count": 0,
             "used_in_model_count": 0,
+            "point_in_time_rejected_count": 0,
+            "point_in_time_rejection_reasons": {},
+            "event_time_confidence": "missing" if empty_reason == "missing_news_data" else "low",
+            "available_at_join_rule": EVENT_AVAILABLE_AT_JOIN_RULE,
             "message_zh": "暂无可进入模型的新闻事件输入；Feature Store 不会伪造事件因子。",
         }
 
@@ -184,13 +224,27 @@ def _build_event_frame(market_index: pd.DatetimeIndex, output_dir: Path) -> tupl
             "status": "missing_trade_date",
             "row_count": 0,
             "used_in_model_count": 0,
+            "point_in_time_rejected_count": 0,
+            "point_in_time_rejection_reasons": {},
+            "event_time_confidence": "low",
+            "available_at_join_rule": EVENT_AVAILABLE_AT_JOIN_RULE,
         }
     data.index = pd.DatetimeIndex(pd.to_datetime(data[date_col], errors="coerce")).normalize()
     data = data[~data.index.isna()].sort_index()
     data = data[~data.index.duplicated(keep="last")]
     observed_count = 0
+    point_in_time_rejected_count = 0
+    missing_available_at_count = 0
+    rejection_reasons: dict[str, int] = {}
     for day, row in data.iterrows():
         if day not in event.index:
+            continue
+        visible, reason = _event_visible_for_trade_day(row, pd.Timestamp(day))
+        if reason == "available_at_missing_legacy_allowed":
+            missing_available_at_count += 1
+        if not visible:
+            point_in_time_rejected_count += 1
+            rejection_reasons[reason] = rejection_reasons.get(reason, 0) + 1
             continue
         observed_count += 1
         event.loc[day, "_event_data_status"] = "event_observed"
@@ -203,6 +257,11 @@ def _build_event_frame(market_index: pd.DatetimeIndex, output_dir: Path) -> tupl
         "row_count": int(len(data)),
         "aligned_event_count": int(observed_count),
         "used_in_model_count": int(payload.get("used_in_model_count") or len(rows)) if isinstance(payload, Mapping) else int(len(rows)),
+        "point_in_time_rejected_count": int(point_in_time_rejected_count),
+        "point_in_time_rejection_reasons": rejection_reasons,
+        "missing_available_at_count": int(missing_available_at_count),
+        "event_time_confidence": "high" if missing_available_at_count == 0 else "medium",
+        "available_at_join_rule": EVENT_AVAILABLE_AT_JOIN_RULE,
         "message_zh": "事件因子按沪锡交易日精确对齐；无事件日期填 0，并标记 true_zero_event。",
     }
 
@@ -245,8 +304,15 @@ def _classify_fields(
             excluded.append(str(field))
             reasons[str(field)] = "all_missing"
             continue
-        non_null_rate = float(numeric.notna().mean())
         all_zero = bool(float(numeric.fillna(0.0).abs().sum()) == 0.0)
+        source = field_sources.get(str(field), "")
+        if source == "cross_market" and "_cross_market_stale" in frame.columns:
+            valid_non_stale = numeric.where(~frame["_cross_market_stale"].astype(bool)).notna().mean()
+            if int(frame["_cross_market_stale"].astype(bool).sum()) > 0 and float(valid_non_stale) < min_coverage:
+                excluded.append(str(field))
+                reasons[str(field)] = "stale_after_alignment"
+                continue
+        non_null_rate = float(numeric.notna().mean())
         if field in EVENT_FACTOR_INPUT_FIELDS and all_zero:
             excluded.append(str(field))
             reasons[str(field)] = event_status if event_status in {"missing_news_data", "no_used_in_model_event_inputs"} else "all_zero_true_zero_event"
@@ -259,12 +325,11 @@ def _classify_fields(
             excluded.append(str(field))
             reasons[str(field)] = f"insufficient_non_null_rate:{non_null_rate:.3f}"
             continue
-        source = field_sources.get(str(field), "")
         if source == "cross_market" and "_cross_market_stale" in frame.columns:
             valid_non_stale = numeric.where(~frame["_cross_market_stale"].astype(bool)).notna().mean()
             if float(valid_non_stale) < min_coverage:
                 excluded.append(str(field))
-                reasons[str(field)] = f"stale_after_alignment:{valid_non_stale:.3f}"
+                reasons[str(field)] = "stale_after_alignment"
                 continue
         usable.append(str(field))
     return sorted(set(usable)), sorted(set(excluded)), reasons
@@ -286,8 +351,30 @@ def _read_manifest(version: str | None = "v3") -> dict[str, Any] | None:
 def build_feature_store(version: str = "v3") -> dict[str, Any]:
     version = _normalise_version(version)
     output_dir = _output_dir()
-    market, market_diag = _load_market_frame(output_dir)
     manifest_path = _feature_store_manifest_path(version)
+    provenance = build_runtime_provenance_report(output_dir)
+    gates = provenance.get("gates") if isinstance(provenance.get("gates"), Mapping) else {}
+    gate = gates.get("feature_store") if isinstance(gates.get("feature_store"), Mapping) else {}
+    if not gate.get("allowed"):
+        payload = {
+            "version": version,
+            "status": "blocked",
+            "message_zh": "数据水位未通过，Feature Store 未构建。",
+            "row_count": 0,
+            "feature_store_path": str(_feature_store_csv_path(version)),
+            "manifest_path": str(manifest_path),
+            "sample_data_used": bool(provenance.get("sample_data_used")),
+            "baseline_used": bool(provenance.get("baseline_used")),
+            "leakage_check_pass": False,
+            "provenance_gate": gate,
+            "provenance_records": provenance.get("records", []),
+            "blocking_reasons": gate.get("blocking_reasons", []),
+        }
+        manifest_path.parent.mkdir(parents=True, exist_ok=True)
+        manifest_path.write_text(json.dumps(sanitize_for_json(payload), ensure_ascii=False, indent=2), encoding="utf-8")
+        return sanitize_for_json(payload)
+
+    market, market_diag = _load_market_frame(output_dir)
     if market.empty:
         payload = {
             "version": version,
@@ -347,20 +434,44 @@ def build_feature_store(version: str = "v3") -> dict[str, Any]:
     leakage_check_pass = bool(leakage.get("ok") and not [field for field in usable if _field_is_forbidden(field)])
 
     store_path = _write_store_frame(combined, version)
+    date_start = str(combined["trade_date"].min()) if len(combined) else None
+    date_end = str(combined["trade_date"].max()) if len(combined) else None
     manifest = {
         "version": version,
         "status": "success",
         "generated_at": datetime.now().isoformat(timespec="seconds"),
         "row_count": int(len(combined)),
-        "date_start": str(combined["trade_date"].min()) if len(combined) else None,
-        "date_end": str(combined["trade_date"].max()) if len(combined) else None,
+        "feature_count": int(len(usable)),
+        "primary_index": "sn_market_history.trade_date",
+        "as_of_cutoff": {
+            "date_start": date_start,
+            "date_end": date_end,
+            "timezone": FEATURE_STORE_TIMEZONE,
+            "event_available_at_rule": EVENT_AVAILABLE_AT_JOIN_RULE,
+        },
+        "date_start": date_start,
+        "date_end": date_end,
         "feature_store_path": store_path,
         "manifest_path": str(manifest_path),
+        "input_manifests": {
+            "market_history": market_diag,
+            "cross_market": cross_diag,
+            "event_factor_inputs": event_diag,
+            "provenance_gate": gate,
+            "provenance_records": provenance.get("records", []),
+        },
         "field_sources": field_sources,
+        "point_in_time_join_rules": {
+            "primary_market_history": "immutable daily bars indexed by trade_date",
+            "cross_market": f"last observation carried forward only when age <= {MAX_FORWARD_FILL_TRADING_DAYS} trading days",
+            "event_factor_inputs": EVENT_AVAILABLE_AT_JOIN_RULE,
+            "display_overlay": "excluded from feature store and training datasets",
+            "labels": "forward returns and label-like columns are excluded from usable_fields",
+        },
         "alignment_rules": {
             "primary_index": "sn_market_history.trade_date",
             "cross_market": "date join with backward-looking forward-fill only",
-            "event_factor_inputs": "exact trade_date join; no forward/back fill",
+            "event_factor_inputs": EVENT_AVAILABLE_AT_JOIN_RULE,
         },
         "forward_fill_rules": {
             "cross_market": {"method": "last_observation_carried_forward", "max_trading_days": MAX_FORWARD_FILL_TRADING_DAYS},
@@ -382,6 +493,15 @@ def build_feature_store(version: str = "v3") -> dict[str, Any]:
         "leakage_check_details": leakage,
         "sample_data_used": False,
         "baseline_used": False,
+        "display_overlay_used": False,
+        "live_quote_used_for_training": False,
+        "legacy_feature_store_versions": {
+            "primary_version": FEATURE_STORE_PRIMARY_VERSION,
+            "compatibility_strategy": "v4-v12 remain compatibility paths until wrapped or archived; no new copy-paste variants should be added.",
+        },
+        "provenance_gate": gate,
+        "provenance_records": provenance.get("records", []),
+        "blocking_reasons": gate.get("blocking_reasons", []),
         "customer_prediction_generated": False,
         "active_model_written": False,
         "message_zh": "Feature Store v3 已构建；本步骤不训练模型、不生成预测、不发布 active。",

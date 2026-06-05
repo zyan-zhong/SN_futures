@@ -14,12 +14,13 @@ from .runtime import get_user_data_dir
 
 EVENT_COLUMNS = (
     "event_id", "title", "summary", "raw_text", "source", "source_tier", "provider", "raw_url", "canonical_url",
-    "url_status", "published_at", "fetched_at", "available_at", "updated_at", "category", "event_type",
+    "url_status", "url_sanitized", "region", "language", "published_at", "source_published_at", "fetched_at",
+    "available_at", "event_time_confidence", "updated_at", "category", "event_type",
     "entity_tags", "symbol_tags", "commodity_tags", "horizon_tags", "direction_bias", "direction_confidence",
     "impact_score", "sentiment_score", "supply_score", "demand_score", "inventory_score", "policy_score",
     "macro_score", "volatility_score", "risk_score", "time_decay_weight", "source_confidence",
-    "final_event_weight", "used_in_model", "rejected_reason", "feature_window", "content_hash", "dedupe_key",
-    "batch_id", "relevance_score", "event_group_id",
+    "source_reliability_score", "final_event_weight", "used_in_model", "rejected_reason", "feature_window",
+    "content_hash", "dedupe_key", "batch_id", "relevance_score", "event_group_id",
 )
 
 
@@ -44,9 +45,14 @@ def _connect(path: Path | None = None) -> sqlite3.Connection:
             raw_url TEXT,
             canonical_url TEXT,
             url_status TEXT,
+            url_sanitized TEXT,
+            region TEXT,
+            language TEXT,
             published_at TEXT,
+            source_published_at TEXT,
             fetched_at TEXT,
             available_at TEXT,
+            event_time_confidence REAL,
             updated_at TEXT,
             category TEXT,
             event_type TEXT,
@@ -67,6 +73,7 @@ def _connect(path: Path | None = None) -> sqlite3.Connection:
             risk_score REAL,
             time_decay_weight REAL,
             source_confidence REAL,
+            source_reliability_score REAL,
             final_event_weight REAL,
             used_in_model INTEGER,
             rejected_reason TEXT,
@@ -99,6 +106,12 @@ def _connect(path: Path | None = None) -> sqlite3.Connection:
     for col, ddl in {
         "raw_url": "TEXT",
         "event_group_id": "TEXT",
+        "url_sanitized": "TEXT",
+        "region": "TEXT",
+        "language": "TEXT",
+        "source_published_at": "TEXT",
+        "event_time_confidence": "REAL",
+        "source_reliability_score": "REAL",
     }.items():
         if col not in existing:
             conn.execute(f"ALTER TABLE event_store ADD COLUMN {col} {ddl}")
@@ -117,6 +130,10 @@ def _row_for_db(event: dict[str, Any]) -> dict[str, Any]:
     canonical_url = safe_url(str(row.get("canonical_url") or raw_url))
     row["raw_url"] = raw_url
     row["canonical_url"] = canonical_url
+    row["url_sanitized"] = str(row.get("url_sanitized") or canonical_url or raw_url)
+    row["source_published_at"] = str(row.get("source_published_at") or row.get("published_at") or "")
+    row["event_time_confidence"] = float(row.get("event_time_confidence") or 0.0)
+    row["source_reliability_score"] = float(row.get("source_reliability_score") or row.get("source_confidence") or 0.0)
     if canonical_url and not row.get("url_status"):
         row["url_status"] = "ok"
     row["used_in_model"] = 1 if bool(row.get("used_in_model")) else 0

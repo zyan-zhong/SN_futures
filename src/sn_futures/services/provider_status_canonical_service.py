@@ -359,6 +359,14 @@ def build_canonical_provider_status() -> dict[str, Any]:
         "active_updated": False,
         "customer_prediction_generated": False,
     }
+    try:
+        from ..data_providers.provider_registry import list_provider_registry
+
+        payload["provider_interface_schema_version"] = "provider-result-v1"
+        payload["provider_registry"] = list_provider_registry()
+    except Exception:
+        payload["provider_interface_schema_version"] = ""
+        payload["provider_registry"] = []
     _write_json(_canonical_path(), payload)
     return sanitize_for_json(payload)
 

@@ -1,63 +1,59 @@
 # Private Bundle Keys
 
-Private bundle keys are supported only for controlled private/offline research builds. They must never be committed, printed, written to release notes as complete values, or exposed through frontend assets, logs, diagnostics, cache files, or public releases.
+Private bundle key embedding is disabled. Provider keys must never be committed, printed, written to release notes as complete values, or embedded in PyInstaller onedir/installer assets. Users configure keys on the local machine through the settings page or `%LOCALAPPDATA%\SNInsightTerminal\config\secrets.json`.
 
 ## Supported Providers
 
-The private bundle seed can include:
+The local user secrets file can include:
 
 - `SN_ALPHA_VANTAGE_KEY`
 - `SN_NEWSAPI_KEY`
 - `SN_TUSHARE_TOKEN`
-- `SN_MANAGED_DATA_PROXY_TOKEN` from `SN_MANAGED_PROXY_TOKEN` or `SN_MANAGED_DATA_PROXY_TOKEN`, when available
+- `SN_LOCAL_API_PROVIDER_TOKEN`
 
-The release build logs only configured/masked status for each provider.
+Legacy `SN_MANAGED_PROXY_TOKEN` and `SN_MANAGED_DATA_PROXY_TOKEN` may still be resolved as backward-compatible aliases, but new local configuration should write the canonical `SN_LOCAL_API_PROVIDER_TOKEN` name.
+
+The release build must not log, package, or embed complete provider keys.
 
 ## Build Inputs
 
-Private keys can be supplied by:
+Private key build inputs are not supported. `-PrivateBundleKeys`, `-AllowEmbeddedProviderKeys`, and `-RequireAllPrivateProviderKeys` fail fast in `packaging/build_release.ps1`.
 
-- `packaging/private_release_keys.json`
-- environment variables such as `SN_BUNDLE_ALPHA_VANTAGE_KEY`, `SN_BUNDLE_NEWSAPI_KEY`, `SN_BUNDLE_TUSHARE_TOKEN`, and `SN_BUNDLE_MANAGED_PROXY_TOKEN`
+Allowed configuration paths:
 
-When `-PrivateBundleKeys` is enabled, `packaging/build_release.ps1` always reads the private keys file and merges it with environment variables. This matters when Alpha Vantage or NewsAPI are supplied by environment variables but Tushare is supplied by the private keys file.
-
-Use `-RequireAllPrivateProviderKeys` for 0.4.2 private research patch builds so missing Alpha Vantage, NewsAPI, or Tushare configuration fails before packaging.
+- settings page save flow
+- `%LOCALAPPDATA%\SNInsightTerminal\config\secrets.json`
+- process environment variables for local developer runs
+- development `.env` only for local development, never for packaging
 
 ## Build Command
 
 ```powershell
 .\packaging\build_release.ps1 `
-  -PrivateBundleKeys `
-  -PrivateKeysFile "packaging/private_release_keys.json" `
-  -AllowEmbeddedProviderKeys `
-  -RequireAllPrivateProviderKeys `
   -NodePath "C:\Program Files\nodejs\node.exe" `
   -NpmPath "C:\Program Files\nodejs\npm.cmd"
 ```
 
 ## Runtime Import
 
-On first run, `import_private_bundle_keys_if_needed()` imports missing provider keys into `%LOCALAPPDATA%\SNInsightTerminal\config\secrets.json` and records source as `private_bundle`.
+On first run, the app creates the user data directory and a `secrets.example.json` template. Missing provider keys remain `未配置` until the user configures them locally.
 
 Rules:
 
 - Existing user secrets are not overwritten.
-- Missing Tushare can be imported independently of Alpha Vantage and NewsAPI.
 - Settings and key diagnostics expose only `configured`, `source`, and `masked`.
-- Reset removes user secrets and restores private bundle defaults, including Tushare when it exists in the bundle.
+- Reset removes user secrets and does not restore embedded private defaults.
+- Unconfigured providers must not generate fake predictions, fake backtests, or fake data-status success.
 
 ## Installed Smoke
 
-`packaging/smoke_installed.ps1 -RunBrowserSmoke -ExpectPrivateBundleKeys` validates:
+`packaging/smoke_installed.ps1 -RunBrowserSmoke` validates:
 
-- Alpha Vantage configured/masked
-- NewsAPI configured/masked
-- Tushare configured/masked
-- Tushare source is `private_bundle`, `user_secrets`, or `env`
+- unconfigured provider status is explicit
+- configured keys, if supplied by the local user, are masked
 - Tushare API permission, quota, or endpoint status is not required for install success
 - Runtime secret scan passes
 
 ## Security Boundary
 
-Complete provider keys may exist only in local private build input files, the PyInstaller internal private seed, or the user data secrets file after first-run import. They must not appear in Git, docs, release logs, frontend dist, diagnostics bundles, or customer-facing reports.
+Complete provider keys may exist only in the local user secrets file or local development environment. They must not appear in Git, docs, release logs, frontend dist, PyInstaller `_internal`, diagnostics bundles, cache files, or customer-facing reports.

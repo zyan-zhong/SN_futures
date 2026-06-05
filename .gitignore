@@ -7,8 +7,8 @@ __pycache__/
 
 # Build and packaged intermediate outputs
 build/
-build/private_bundle_seed.json
 dist/
+release/
 release_archive/
 node_modules/
 frontend/node_modules/
@@ -24,6 +24,7 @@ frontend/vite.config.d.ts
 config/managed_proxy.local.json
 config/managed_proxy.mapping.local.json
 secrets/
+app_data/
 app_data/cache/
 app_data/tmp/
 app_data/downloads/
@@ -40,6 +41,8 @@ _sn_setup_runtime/
 *.sqlite
 *.sqlite3
 *.db
+*.sqlite-journal
+*.db-journal
 
 # Temporary logs and smoke artifacts
 tmp_*
@@ -53,12 +56,9 @@ setup_gpu_smoke.txt
 
 # Browser smoke profiles
 tmp_chrome*/
+e2e-artifacts/
 frontend/test-results/
 test-results/
-
-# Keep official release installer, but ignore any extra release artifacts.
-release/*
-!release/SNInsightTerminal_Setup.exe
-!release/SHA256SUMS.txt
 packaging/private_release_keys.json
+build/private_bundle_seed.json
 release/private_bundle_seed.json

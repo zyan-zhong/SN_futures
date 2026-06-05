@@ -16,7 +16,7 @@ function Test-SecretLikeLine {
     if ($Text -match '(?i)(?<![A-Za-z0-9_])(apikey|api_key)\s*=\s*(?!' + $placeholder + ')[^&\s,;''"]{8,}') { return $true }
     if ($Text -match '(?i)(?<![A-Za-z0-9_])(x-api-key|authorization)\s*[:=]\s*["'']?(?!' + $placeholder + ')[A-Za-z0-9._\-]{12,}') { return $true }
     if ($Text -match '(?i)Bearer\s+(?!' + $placeholder + ')[A-Za-z0-9._-]{12,}') { return $true }
-    if ($Text -match '(?i)(SN_ALPHA_VANTAGE_KEY|SN_NEWSAPI_KEY|SN_MANAGED_PROXY_TOKEN|SN_MANAGED_DATA_PROXY_TOKEN|SN_TUSHARE_TOKEN)\s*=\s*(?!' + $placeholder + ')([A-Za-z0-9._\-]{8,})') { return $true }
+    if ($Text -match '(?i)(SN_ALPHA_VANTAGE_KEY|SN_NEWSAPI_KEY|SN_LOCAL_API_PROVIDER_TOKEN|SN_MANAGED_PROXY_TOKEN|SN_MANAGED_DATA_PROXY_TOKEN|SN_TUSHARE_TOKEN)\s*=\s*(?!' + $placeholder + ')([A-Za-z0-9._\-]{8,})') { return $true }
     return $false
 }
 
@@ -30,7 +30,7 @@ sys.path.insert(0, str(Path(r"$projectRoot") / "src"))
 try:
     from sn_futures.services.api_key_resolver import resolved_secret_value
     import os
-    names = ["SN_ALPHA_VANTAGE_KEY", "SN_NEWSAPI_KEY", "SN_MANAGED_PROXY_TOKEN", "SN_MANAGED_DATA_PROXY_TOKEN", "SN_TUSHARE_TOKEN"]
+    names = ["SN_ALPHA_VANTAGE_KEY", "SN_NEWSAPI_KEY", "SN_LOCAL_API_PROVIDER_TOKEN", "SN_MANAGED_PROXY_TOKEN", "SN_MANAGED_DATA_PROXY_TOKEN", "SN_TUSHARE_TOKEN"]
     values = [resolved_secret_value(name) for name in names]
     values.extend(str(os.environ.get(name, "")) for name in names)
     print(json.dumps([value for value in values if value and len(value) >= 8]))

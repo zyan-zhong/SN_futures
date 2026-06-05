@@ -5,6 +5,7 @@ from typing import Any, Mapping
 
 from sn_futures.governance import ModelRegistry, build_learning_status
 
+from ..runtime import get_user_output_dir
 from .payload_utils import sanitize_for_json
 
 
@@ -15,7 +16,7 @@ def build_api_learning_status(
     model_health: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     state = dict(scheduler_state or {})
-    registry = ModelRegistry(registry_path or Path("app_data/outputs/model_governance_registry.json"))
+    registry = ModelRegistry(registry_path or get_user_output_dir() / "model_governance_registry.json")
     task_state = {
         "last_market_refresh": state.get("last_market_refresh", "暂未运行"),
         "last_prediction": state.get("last_prediction_refresh", state.get("last_prediction", "暂未运行")),

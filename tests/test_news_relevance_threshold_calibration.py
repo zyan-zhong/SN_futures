@@ -34,6 +34,7 @@ class NewsRelevanceThresholdCalibrationTest(unittest.TestCase):
                 {
                     "title": "SHFE tin inventory falls as Indonesia tin export quota stalls",
                     "description": "Futures market monitors warehouse stockpiles.",
+                    "source_published_at": "2026-01-02T09:00:00",
                 },
                 {
                     "title": "Tin can packaging demand rises",

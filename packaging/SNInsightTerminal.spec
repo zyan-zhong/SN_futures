@@ -10,7 +10,6 @@ elif (spec_path.parent / "frontend").exists():
 else:
     project_root = spec_path.parent.parent.resolve()
 frontend_dist = project_root / "frontend" / "dist"
-private_bundle_seed = project_root / "build" / "private_bundle_seed.json"
 
 if not frontend_dist.exists():
     raise SystemExit("正式发行需要先构建 frontend/dist：请运行 packaging/build_release.ps1")
@@ -24,9 +23,6 @@ datas = [
     (str(project_root / "docs" / "TERMINAL_VALIDATION_REPORT.md"), "docs"),
     (str(project_root / "docs" / "RELEASE_PRECHECKLIST.md"), "docs"),
 ]
-
-if private_bundle_seed.exists():
-    datas.append((str(private_bundle_seed), "private"))
 
 excluded = [
     "tests",

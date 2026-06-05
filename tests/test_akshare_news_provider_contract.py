@@ -118,6 +118,34 @@ class SecretLeakingAkShareNews:
         return pd.DataFrame()
 
 
+class DeterministicAkShareTimeoutExecutor:
+    def __init__(self, *, timeout_functions: set[str]) -> None:
+        self.timeout_functions = set(timeout_functions)
+
+    def __call__(
+        self,
+        ak_module: object,
+        function_name: str,
+        params_list: list[dict[str, object]],
+        timeout_seconds: float | None,
+    ) -> dict[str, list[object]]:
+        del ak_module, params_list, timeout_seconds
+        if function_name in self.timeout_functions:
+            return {
+                "rows": [],
+                "errors": [
+                    {
+                        "error_code": "request_timeout",
+                        "message": f"request_timeout: {function_name} timed out in deterministic contract executor",
+                        "timed_out": True,
+                    }
+                ],
+            }
+        if function_name == "futures_news_shmet":
+            return {"rows": [_valid_row("SHFE tin warehouse warrants tighten after Indonesia export delay")], "errors": []}
+        return {"rows": [_valid_row("CLS tin source row")], "errors": []}
+
+
 class AkShareNewsProviderContractTest(unittest.TestCase):
     def test_missing_akshare_import_returns_structured_status(self) -> None:
         real_import = importlib.import_module
@@ -186,8 +214,9 @@ class AkShareNewsProviderContractTest(unittest.TestCase):
     def test_one_source_timeout_returns_quickly_with_partial_success_manifest(self) -> None:
         started = time.perf_counter()
         result = AkShareNewsProvider(
-            ak_module=PartialTimeoutAkShareNews(),
+            ak_module=ValidAkShareNews(),
             call_timeout_seconds=2.0,
+            source_call_executor=DeterministicAkShareTimeoutExecutor(timeout_functions={"stock_info_global_cls"}),
         ).fetch()
         elapsed = time.perf_counter() - started
 
@@ -208,8 +237,11 @@ class AkShareNewsProviderContractTest(unittest.TestCase):
     def test_all_sources_timeout_fails_with_source_statuses_and_no_downstream_outputs(self) -> None:
         started = time.perf_counter()
         result = AkShareNewsProvider(
-            ak_module=AllTimeoutAkShareNews(),
+            ak_module=ValidAkShareNews(),
             call_timeout_seconds=2.0,
+            source_call_executor=DeterministicAkShareTimeoutExecutor(
+                timeout_functions={"futures_news_shmet", "stock_info_global_cls"}
+            ),
         ).fetch()
         elapsed = time.perf_counter() - started
 

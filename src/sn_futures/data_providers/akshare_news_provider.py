@@ -11,7 +11,7 @@ import sys
 import time
 from dataclasses import replace
 from datetime import datetime
-from typing import Any, Iterable, Mapping
+from typing import Any, Callable, Iterable, Mapping
 
 import pandas as pd
 
@@ -28,6 +28,7 @@ _LOCAL_PATH_RE = re.compile(r"[A-Za-z]:[\\/][^\s,;\"']+")
 _DEFAULT_CALL_TIMEOUT = object()
 _DEFAULT_MAX_ROWS = object()
 _REAL_AKSHARE_CALL_TIMEOUT_SECONDS = 20.0
+SourceCallExecutor = Callable[[Any, str, list[dict[str, Any]], float | None], dict[str, list[Any]]]
 
 
 class _AkShareCallTimeout(RuntimeError):
@@ -229,8 +230,10 @@ class AkShareNewsProvider(BaseProvider):
         secret_values: Iterable[str] = (),
         call_timeout_seconds: float | None | object = _DEFAULT_CALL_TIMEOUT,
         max_rows_per_source: int | None = None,
+        source_call_executor: SourceCallExecutor | None = None,
     ) -> None:
         self.ak_module = ak_module
+        self.source_call_executor = source_call_executor
         self._secret_values = tuple(str(value) for value in secret_values if str(value or ""))
         if call_timeout_seconds is _DEFAULT_CALL_TIMEOUT:
             self.call_timeout_seconds = None if ak_module is not None else _REAL_AKSHARE_CALL_TIMEOUT_SECONDS
@@ -374,9 +377,22 @@ class AkShareNewsProvider(BaseProvider):
                 source_result = self._call_akshare_source_rows(ak, function_name, params_list)
                 append_call_rows(source_result.get("rows", []))
                 for message in source_result.get("errors", []):
-                    sanitized = _safe_error(message, self.secret_values())
-                    errors.append({"error_code": self.classify_error(sanitized), "message": sanitized, "timed_out": False})
+                    if isinstance(message, Mapping):
+                        sanitized = _safe_error(message.get("message") or message.get("error_code") or "", self.secret_values())
+                        error_code = str(message.get("error_code") or self.classify_error(sanitized))
+                        errors.append(
+                            {
+                                "error_code": error_code,
+                                "message": sanitized,
+                                "timed_out": bool(message.get("timed_out")) or error_code == "request_timeout",
+                            }
+                        )
+                    else:
+                        sanitized = _safe_error(message, self.secret_values())
+                        errors.append({"error_code": self.classify_error(sanitized), "message": sanitized, "timed_out": False})
             except _AkShareCallTimeout as exc:
+                errors.append({"error_code": "request_timeout", "message": _safe_error(exc, self.secret_values()), "timed_out": True})
+            except TimeoutError as exc:
                 errors.append({"error_code": "request_timeout", "message": _safe_error(exc, self.secret_values()), "timed_out": True})
             except Exception as exc:
                 message = _safe_error(exc, self.secret_values())
@@ -442,6 +458,8 @@ class AkShareNewsProvider(BaseProvider):
         return _rows_from_payload(fn(**params))
 
     def _call_akshare_source_rows(self, ak: Any, function_name: str, params_list: list[dict[str, Any]]) -> dict[str, list[Any]]:
+        if self.source_call_executor is not None:
+            return self.source_call_executor(ak, function_name, params_list, self.call_timeout_seconds)
         if self.ak_module is None:
             return self._call_real_akshare_source_subprocess(function_name, params_list)
         return self._call_injected_akshare_source_process(ak, function_name, params_list)

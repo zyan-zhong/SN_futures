@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
+import tempfile
 import unittest
 from unittest.mock import patch
 
@@ -140,6 +142,29 @@ class TerminalApiTest(unittest.TestCase):
         self.assertEqual(predictions[0]["stop_loss"], None)
         self.assertEqual(predictions[0]["take_profit"], None)
         self.assertEqual(predictions[0]["trade_point_note"], "暂无交易点位")
+
+    def test_predictions_without_keys_or_real_data_are_blocked_empty(self) -> None:
+        env = {
+            "SN_ALPHA_VANTAGE_KEY": "",
+            "SN_NEWSAPI_KEY": "",
+            "SN_TUSHARE_TOKEN": "",
+            "SN_LOCAL_API_PROVIDER_ENABLED": "0",
+            "SN_LOCAL_API_PROVIDER_TOKEN": "",
+            "SN_MANAGED_PROXY_TOKEN": "",
+            "SN_MANAGED_DATA_PROXY_TOKEN": "",
+        }
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {**env, "SN_DATA_DIR": tmp, "SN_INSIGHT_DATA_DIR": tmp}, clear=False):
+            status, payload = handle_terminal_api("/api/terminal/predictions", "GET", {}, None)
+
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["predictions"], [])
+        self.assertEqual(payload.get("status"), "blocked")
+        self.assertFalse(payload.get("baseline_used"))
+        self.assertFalse(payload.get("customer_prediction_generated"))
+        self.assertTrue(payload.get("blocking_reasons"))
+        text = json.dumps(payload, ensure_ascii=False)
+        self.assertNotIn('"sample": true', text)
+        self.assertNotIn('"sample_mode": true', text)
 
     def test_clean_trade_points_for_degraded_low_quality_and_edge(self) -> None:
         payload = {

@@ -141,6 +141,8 @@ def build_terminal_predictions() -> list[dict[str, Any]]:
     for horizon, raw_card in cards.items():
         if not isinstance(raw_card, Mapping):
             continue
+        if raw_card.get("sample") or raw_card.get("sample_mode") or raw_card.get("baseline_used"):
+            continue
         p_up = _as_float(raw_card.get("p_up", raw_card.get("prob_up")))
         card_quality = _as_float(raw_card.get("data_quality_score"), global_quality)
         decision = raw_card.get("决策说明")
@@ -174,6 +176,56 @@ def build_terminal_predictions() -> list[dict[str, Any]]:
         out.append(clean_trade_points(sanitize_for_json(prediction)))
 
     return sanitize_for_json(out)
+
+
+def _prediction_payload_reasons(live: Mapping[str, Any]) -> list[str]:
+    reasons = live.get("blocking_reasons")
+    if isinstance(reasons, list):
+        return [str(item) for item in reasons if item]
+    guarded = live.get("guarded_layer")
+    if isinstance(guarded, Mapping) and isinstance(guarded.get("abstain_reasons"), list):
+        return [str(item) for item in guarded.get("abstain_reasons") if item]
+    gate = live.get("provenance_gate")
+    if isinstance(gate, Mapping) and isinstance(gate.get("blocking_reasons"), list):
+        return [str(item) for item in gate.get("blocking_reasons") if item]
+    watermark = live.get("data_watermark")
+    if isinstance(watermark, Mapping) and isinstance(watermark.get("blocking_reasons"), list):
+        return [str(item) for item in watermark.get("blocking_reasons") if item]
+    return []
+
+
+def build_terminal_predictions_payload() -> dict[str, Any]:
+    from .. import v2_api
+
+    live = _safe_call(
+        "prediction service",
+        v2_api.get_live_predictions,
+        {"status": "blocked", "cards": {}, "blocking_reasons": ["prediction service unavailable"]},
+    )
+    live_payload = live if isinstance(live, Mapping) else {}
+    predictions = build_terminal_predictions()
+    watermark = live_payload.get("data_watermark") if isinstance(live_payload.get("data_watermark"), Mapping) else {}
+    reasons = _prediction_payload_reasons(live_payload)
+    status = str(live_payload.get("status") or ("ready" if predictions else "blocked"))
+    if not predictions and status not in {"blocked", "missing"}:
+        status = "blocked"
+    if not predictions and not reasons:
+        reasons = ["真实数据缺失或预测水位未通过，未生成客户预测。"]
+
+    return sanitize_for_json(
+        {
+            "status": status,
+            "predictions": predictions,
+            "cards": {} if status in {"blocked", "missing"} else live_payload.get("cards", {}),
+            "blocking_reasons": reasons,
+            "baseline_used": bool(live_payload.get("baseline_used") or watermark.get("baseline_used")),
+            "sample_data_used": bool(live_payload.get("sample_data_used") or watermark.get("sample_data_used")),
+            "customer_prediction_generated": bool(predictions) and status not in {"blocked", "missing"},
+            "data_watermark": watermark,
+            "provenance_gate": live_payload.get("provenance_gate", {}),
+            "disclaimer": live_payload.get("disclaimer") or DISCLAIMER,
+        }
+    )
 
 
 def build_terminal_summary() -> dict[str, Any]:
@@ -824,12 +876,7 @@ def _is_empty_sequence_payload(payload: Any, key: str) -> bool:
 
 
 def build_terminal_predictions() -> list[dict[str, Any]]:  # type: ignore[override]
-    real = _REAL_BUILD_TERMINAL_PREDICTIONS()
-    if real or _refresh_has_run():
-        return real
-    from .sample_data_service import sample_predictions
-
-    return sanitize_for_json(sample_predictions())
+    return _REAL_BUILD_TERMINAL_PREDICTIONS()
 
 
 def build_terminal_summary() -> dict[str, Any]:  # type: ignore[override]
@@ -1037,10 +1084,6 @@ def _runtime_report_exists(report_type: str = "daily") -> bool:
 
 
 def build_terminal_predictions() -> list[dict[str, Any]]:  # type: ignore[override]
-    if not _refresh_has_run() and not _runtime_file_exists("sn_unified_forecast.json", "sn_live_predictions.json"):
-        from .sample_data_service import sample_predictions
-
-        return sanitize_for_json(sample_predictions())
     return _REAL_BUILD_TERMINAL_PREDICTIONS()
 
 

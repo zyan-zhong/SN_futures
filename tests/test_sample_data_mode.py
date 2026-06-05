@@ -31,15 +31,16 @@ def test_sample_reports_are_clearly_disclaimed() -> None:
     assert "样例报告，不构成投资建议。" in event
 
 
-def test_terminal_api_returns_sample_mode_for_empty_runtime(monkeypatch, tmp_path) -> None:
+def test_terminal_api_sample_mode_does_not_return_sample_predictions(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("SN_DATA_DIR", str(tmp_path))
     status, payload = handle_terminal_api("/api/terminal/snapshot", "GET", {}, None)
     assert status == 200
     assert payload["sample_mode"] is True
     assert "样例数据模式" in payload["sample_banner_zh"]
-    assert payload["predictions"]
-    assert all(card["signal"] == "观望" for card in payload["predictions"])
-    assert all(card.get("entry") is None for card in payload["predictions"])
+    assert payload["predictions"] == []
+    predictions_text = json.dumps(payload["predictions"], ensure_ascii=False)
+    assert '"sample": true' not in predictions_text
+    assert '"sample_mode": true' not in predictions_text
 
 
 def test_refresh_status_disables_sample_mode(monkeypatch, tmp_path) -> None:

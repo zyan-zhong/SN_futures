@@ -22,6 +22,7 @@ from ..services.terminal_service import (
     build_terminal_price_history,
     build_terminal_report_full,
     build_terminal_predictions,
+    build_terminal_predictions_payload,
     build_terminal_reports,
     build_terminal_summary,
     build_terminal_system_health,
@@ -1475,7 +1476,7 @@ def handle_terminal_api(
         if path == "/api/terminal/snapshot":
             return _ok(cached_call("terminal:snapshot", 5, build_terminal_snapshot))
         if path == "/api/terminal/predictions":
-            return _ok({"predictions": build_terminal_predictions()})
+            return _ok(build_terminal_predictions_payload())
         if path == "/api/terminal/prediction-workspace/status":
             return _ok(build_prediction_workspace_status())
         if path == "/api/terminal/setup-checklist/status":

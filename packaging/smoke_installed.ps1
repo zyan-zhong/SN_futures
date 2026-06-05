@@ -1,5 +1,10 @@
 param(
   [string]$SetupPath = "",
+  [string]$InstalledRoot = "",
+  [string]$DataDir = "",
+  [switch]$UseTempDataDir,
+  [int]$ApiPort = 0,
+  [int]$TimeoutSeconds = 60,
   [switch]$SkipInstall,
   [switch]$KeepInstalled,
   [switch]$RunBrowserSmoke,
@@ -8,16 +13,33 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+if ($ExpectPrivateBundleKeys) {
+  throw "ExpectPrivateBundleKeys is disabled: installer smoke must validate local per-user provider configuration only."
+}
+
 $ProjectRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 if (-not $SetupPath) {
   $SetupPath = Join-Path $ProjectRoot "release\SNInsightTerminal_Setup.exe"
 }
-$ReportPath = Join-Path $ProjectRoot "release\installed_smoke_report.txt"
 $SmokeLogDir = Join-Path $env:TEMP "SNInsightTerminalSmoke"
-$UserData = Join-Path $env:LOCALAPPDATA "SNInsightTerminal"
-$InstallDir = Join-Path $env:LOCALAPPDATA "Programs\SNInsightTerminal"
+$ReportPath = Join-Path $SmokeLogDir "installed_smoke_report.txt"
+if (-not $InstalledRoot) {
+  $InstalledRoot = Join-Path $env:LOCALAPPDATA "Programs\SNInsightTerminal"
+}
+$InstallDir = $InstalledRoot
 $ExePath = Join-Path $InstallDir "SNInsightTerminal.exe"
 $StartMenuShortcut = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\SNInsightTerminal\SNInsightTerminal.lnk"
+$CreatedTempDataDir = $false
+if ($UseTempDataDir) {
+  $DataDir = Join-Path $env:TEMP ("SNInsightTerminalSmokeData_" + [guid]::NewGuid().ToString("N"))
+  $CreatedTempDataDir = $true
+}
+if ($DataDir) {
+  $UserData = $DataDir
+} else {
+  $UserData = Join-Path $env:LOCALAPPDATA "SNInsightTerminal"
+}
+$TempDataDirPath = $UserData
 
 function Write-SmokeLog {
   param([string]$Message)
@@ -32,6 +54,21 @@ function Assert-True {
     throw $Message
   }
   Write-SmokeLog "PASS: $Message"
+}
+
+function Assert-False {
+  param([bool]$Condition, [string]$Message)
+  Assert-True (-not $Condition) $Message
+}
+
+function Assert-TextNotContains {
+  param([string]$Text, [string[]]$Forbidden, [string]$Scope)
+  foreach ($item in $Forbidden) {
+    if ($Text -like "*$item*") {
+      throw "$Scope contains forbidden content: $item"
+    }
+  }
+  Write-SmokeLog "PASS: $Scope has no forbidden sensitive content."
 }
 
 function Stop-InstalledProcesses {
@@ -58,26 +95,34 @@ function Invoke-SmokeRequest {
     TimeoutSec = $TimeoutSec
   }
   if ($null -ne $Body) {
-    $params["Body"] = ($Body | ConvertTo-Json -Depth 5)
+    $params["Body"] = ($Body | ConvertTo-Json -Depth 8)
     $params["ContentType"] = "application/json"
   }
   return Invoke-RestMethod @params
 }
 
+function Invoke-SmokeWebRequest {
+  param([string]$Uri, [int]$TimeoutSec = 10)
+  return Invoke-WebRequest -UseBasicParsing -Uri $Uri -TimeoutSec $TimeoutSec
+}
+
 function Wait-TerminalPort {
-  param([int[]]$Ports, [int]$TimeoutSeconds = 45)
+  param([int[]]$Ports, [int]$TimeoutSeconds = 60)
   $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
   while ((Get-Date) -lt $deadline) {
-    foreach ($port in $Ports) {
+    foreach ($candidatePort in $Ports) {
       try {
-        Invoke-SmokeRequest -Uri "http://127.0.0.1:$port/api/terminal/docs" | Out-Null
-        return $port
+        $docs = Invoke-SmokeRequest -Uri "http://127.0.0.1:$candidatePort/api/terminal/docs" -TimeoutSec 5
+        if ($null -ne $docs) {
+          Write-SmokeLog "PASS: /api/terminal/docs responded on port $candidatePort"
+          return $candidatePort
+        }
       } catch {
-        Start-Sleep -Milliseconds 200
+        Start-Sleep -Milliseconds 250
       }
     }
   }
-  throw "Timed out waiting for Terminal API on ports 8765-8769."
+  throw "Timed out waiting for Terminal API on configured smoke ports."
 }
 
 function Assert-PortReleased {
@@ -114,90 +159,136 @@ function Assert-NoSNInsightOrphanProcess {
   Write-SmokeLog "PASS: no SNInsightTerminal orphan process remains"
 }
 
-function Assert-TextNotContains {
-  param([string]$Text, [string[]]$Forbidden, [string]$Scope)
-  foreach ($item in $Forbidden) {
-    if ($Text -like "*$item*") {
-      throw "$Scope contains forbidden content: $item"
-    }
+function Set-SmokeEnvironmentValue {
+  param([string]$Name, [string]$Value)
+  if (-not $script:PreviousEnvironment.ContainsKey($Name)) {
+    $script:PreviousEnvironment[$Name] = [Environment]::GetEnvironmentVariable($Name, "Process")
   }
-  Write-SmokeLog "PASS: $Scope has no forbidden sensitive content."
+  [Environment]::SetEnvironmentVariable($Name, $Value, "Process")
 }
 
-"SNInsightTerminal installed smoke started: $(Get-Date -Format s)" | Set-Content -Encoding UTF8 $ReportPath
+function Clear-SmokeEnvironmentValue {
+  param([string]$Name)
+  if (-not $script:PreviousEnvironment.ContainsKey($Name)) {
+    $script:PreviousEnvironment[$Name] = [Environment]::GetEnvironmentVariable($Name, "Process")
+  }
+  [Environment]::SetEnvironmentVariable($Name, $null, "Process")
+}
+
+function Restore-SmokeEnvironment {
+  foreach ($entry in $script:PreviousEnvironment.GetEnumerator()) {
+    [Environment]::SetEnvironmentVariable($entry.Key, $entry.Value, "Process")
+  }
+}
+
+function Configure-IsolatedSmokeEnvironment {
+  New-Item -ItemType Directory -Force -Path $UserData | Out-Null
+  foreach ($name in @(
+    "SN_ALPHA_VANTAGE_KEY",
+    "SN_NEWSAPI_KEY",
+    "SN_TUSHARE_TOKEN",
+    "SN_LOCAL_API_PROVIDER_TOKEN",
+    "SN_LOCAL_API_PROVIDER_BASE_URL",
+    "SN_MANAGED_PROXY_TOKEN",
+    "SN_MANAGED_DATA_PROXY_TOKEN",
+    "SN_MANAGED_PROXY_BASE_URL",
+    "SN_MANAGED_DATA_PROXY_URL",
+    "SN_BUNDLE_ALPHA_VANTAGE_KEY",
+    "SN_BUNDLE_NEWSAPI_KEY",
+    "SN_BUNDLE_TUSHARE_TOKEN"
+  )) {
+    Clear-SmokeEnvironmentValue $name
+  }
+  Set-SmokeEnvironmentValue "SN_DATA_DIR" $UserData
+  Set-SmokeEnvironmentValue "SN_INSIGHT_DATA_DIR" $UserData
+  Set-SmokeEnvironmentValue "SN_DISABLE_AUTO_SCHEDULER" "1"
+  Set-SmokeEnvironmentValue "SN_LOCAL_API_PROVIDER_ENABLED" "0"
+  if ($ApiPort -gt 0) {
+    Set-SmokeEnvironmentValue "SN_TERMINAL_PORT" ([string]$ApiPort)
+    Set-SmokeEnvironmentValue "SN_TERMINAL_API_PORT" ([string]$ApiPort)
+  }
+  Write-SmokeLog "Using isolated smoke data dir: $UserData"
+}
+
+function Assert-UnconfiguredSettings {
+  param([object]$settingsStatus)
+  Assert-True ($settingsStatus.alpha_vantage_configured -eq $false) "Alpha Vantage is unconfigured in isolated smoke"
+  Assert-True ($settingsStatus.newsapi_configured -eq $false) "NewsAPI is unconfigured in isolated smoke"
+  Assert-True ($settingsStatus.tushare_configured -eq $false) "Tushare is unconfigured in isolated smoke"
+  Assert-True ($settingsStatus.local_api_provider_configured -eq $false) "Local API Provider is unconfigured in isolated smoke"
+  Assert-True ($settingsStatus.local_api_provider_enabled -eq $false) "Local API Provider is disabled in isolated smoke"
+}
+
+function Assert-BlockedEmptyPredictions {
+  param([object]$predictionsPayload)
+  $cards = $predictionsPayload.cards
+  $cardsText = if ($null -eq $cards) { "{}" } else { $cards | ConvertTo-Json -Depth 20 }
+  $predictionsCount = if ($null -eq $predictionsPayload.predictions) { 0 } else { @($predictionsPayload.predictions).Count }
+  Assert-True (($predictionsPayload.status -eq "blocked") -or ($predictionsCount -eq 0)) "predictions blocked or empty without provider keys"
+  Assert-True ($predictionsCount -eq 0) "prediction list is empty without provider keys"
+  Assert-True (($cardsText -eq "{}") -or ($cardsText -eq "null")) "prediction cards are empty without provider keys"
+  Assert-True ($predictionsPayload.sample_data_used -eq $false) "sample_data_used is false in installed smoke"
+  Assert-True ($predictionsPayload.baseline_used -eq $false) "baseline_used is false in installed smoke"
+  Assert-True ($predictionsPayload.customer_prediction_generated -eq $false) "customer_prediction_generated is false in installed smoke"
+}
+
 New-Item -ItemType Directory -Force -Path $SmokeLogDir | Out-Null
-
-Assert-True (Test-Path $SetupPath) "installer exists: $SetupPath"
-Stop-InstalledProcesses
-
-if (-not $SkipInstall) {
-  Write-SmokeLog "Starting silent install."
-  $installArgs = @(
-    "/VERYSILENT",
-    "/SUPPRESSMSGBOXES",
-    "/NORESTART",
-    "/SP-",
-    "/DIR=""$InstallDir""",
-    "/LOG=""$(Join-Path $SmokeLogDir "installed_setup.log")"""
-  )
-  $installer = Start-Process -FilePath $SetupPath -ArgumentList $installArgs -Wait -PassThru
-  Assert-True ($installer.ExitCode -eq 0) "installer exit code is 0"
-}
-
-Assert-True (Test-Path $InstallDir) "install directory exists: $InstallDir"
-Assert-True (Test-Path $ExePath) "installed exe exists: $ExePath"
-Assert-True (Test-Path $StartMenuShortcut) "start menu shortcut exists"
-
-$process = Start-Process -FilePath $ExePath -ArgumentList "--no-browser" -PassThru -WindowStyle Hidden
+"SNInsightTerminal installed smoke started: $(Get-Date -Format s)" | Set-Content -Encoding UTF8 $ReportPath
+$script:PreviousEnvironment = @{}
+$process = $null
 $port = 0
 $shutdownAttempted = $false
+
 try {
-  $port = Wait-TerminalPort -Ports @(8765, 8766, 8767, 8768, 8769)
+  Configure-IsolatedSmokeEnvironment
+  Assert-True (Test-Path $SetupPath) "installer exists: $SetupPath"
+  Stop-InstalledProcesses
+
+  if (-not $SkipInstall) {
+    Write-SmokeLog "Starting silent install."
+    $installArgs = @(
+      "/VERYSILENT",
+      "/SUPPRESSMSGBOXES",
+      "/NORESTART",
+      "/SP-",
+      "/DIR=""$InstallDir""",
+      "/LOG=""$(Join-Path $SmokeLogDir "installed_setup.log")"""
+    )
+    $installer = Start-Process -FilePath $SetupPath -ArgumentList $installArgs -Wait -PassThru
+    Assert-True ($installer.ExitCode -eq 0) "installer exit code is 0"
+  }
+
+  Assert-True (Test-Path $InstallDir) "install directory exists: $InstallDir"
+  Assert-True (Test-Path $ExePath) "installed exe exists: $ExePath"
+  if (-not $SkipInstall) {
+    Assert-True (Test-Path $StartMenuShortcut) "start menu shortcut exists"
+  }
+
+  $process = Start-Process -FilePath $ExePath -ArgumentList "--no-browser" -PassThru -WindowStyle Hidden
+  $ports = if ($ApiPort -gt 0) { @($ApiPort) } else { @(8765, 8766, 8767, 8768, 8769) }
+  $port = Wait-TerminalPort -Ports $ports -TimeoutSeconds $TimeoutSeconds
   Write-SmokeLog "detected service port: $port"
-  $processStatus = Invoke-SmokeRequest -Uri "http://127.0.0.1:$port/api/terminal/system/process-status" -TimeoutSec 10
+
+  $docs = Invoke-SmokeRequest -Uri "http://127.0.0.1:$port/api/terminal/docs" -TimeoutSec $TimeoutSeconds
+  Assert-True ($null -ne $docs) "/api/terminal/docs returns 200"
+  $processStatus = Invoke-SmokeRequest -Uri "http://127.0.0.1:$port/api/terminal/system/process-status" -TimeoutSec $TimeoutSeconds
   Assert-True ([int]$processStatus.pid -eq [int]$process.Id) "process-status pid matches installed process"
   Assert-True ([int]$processStatus.port -eq [int]$port) "process-status port matches detected port"
 
-  try {
-    Invoke-SmokeRequest -Uri "http://127.0.0.1:$port/api/terminal/system-health" -TimeoutSec 60 | Out-Null
-    Write-SmokeLog "PASS: system-health endpoint responded"
-  } catch {
-    Write-SmokeLog "WARN: system-health endpoint did not respond within smoke timeout; continuing because docs API is available. $($_.Exception.Message)"
-  }
-  try {
-    Invoke-SmokeRequest -Uri "http://127.0.0.1:$port/api/terminal/data-status" -TimeoutSec 60 | Out-Null
-    Write-SmokeLog "PASS: data-status endpoint responded"
-  } catch {
-    Write-SmokeLog "WARN: data-status endpoint did not respond within smoke timeout; continuing with settings and browser checks. $($_.Exception.Message)"
-  }
-  $settingsStatus = Invoke-SmokeRequest -Uri "http://127.0.0.1:$port/api/terminal/settings/status" -TimeoutSec 60
-  $keyDiagnostics = Invoke-SmokeRequest -Uri "http://127.0.0.1:$port/api/terminal/settings/key-diagnostics" -TimeoutSec 60
-  Invoke-SmokeRequest -Uri "http://127.0.0.1:$port/api/terminal/snapshot" -TimeoutSec 60 | Out-Null
+  $dataStatus = Invoke-SmokeRequest -Uri "http://127.0.0.1:$port/api/terminal/data-status" -TimeoutSec $TimeoutSeconds
+  Assert-True ($null -ne $dataStatus) "/api/terminal/data-status returns 200"
+  $settingsStatus = Invoke-SmokeRequest -Uri "http://127.0.0.1:$port/api/terminal/settings/status" -TimeoutSec $TimeoutSeconds
+  Assert-UnconfiguredSettings $settingsStatus
+  Invoke-SmokeRequest -Uri "http://127.0.0.1:$port/api/terminal/settings/key-diagnostics" -TimeoutSec $TimeoutSeconds | Out-Null
+  $predictions = Invoke-SmokeRequest -Uri "http://127.0.0.1:$port/api/terminal/predictions" -TimeoutSec $TimeoutSeconds
+  Assert-BlockedEmptyPredictions $predictions
 
-  if ($ExpectPrivateBundleKeys) {
-    Assert-True ([bool]$settingsStatus.alpha_vantage_configured) "private bundle Alpha Vantage key is configured"
-    Assert-True ([bool]$settingsStatus.newsapi_configured) "private bundle NewsAPI key is configured"
-    Assert-True ([bool]$settingsStatus.tushare_configured) "private bundle Tushare key is configured"
-    Assert-True (([string]$settingsStatus.tushare_masked).Length -gt 0) "private bundle Tushare key is masked"
-    Assert-True ($settingsStatus.alpha_vantage_source -in @("private_bundle", "user_secrets", "env")) "Alpha Vantage source is private_bundle/user_secrets/env"
-    Assert-True ($settingsStatus.newsapi_source -in @("private_bundle", "user_secrets", "env")) "NewsAPI source is private_bundle/user_secrets/env"
-    Assert-True ($settingsStatus.tushare_source -in @("private_bundle", "user_secrets", "env")) "Tushare source is private_bundle/user_secrets/env"
-    $diagText = $keyDiagnostics | ConvertTo-Json -Depth 10
-    Assert-True ($diagText -notlike "*SN_BUNDLE_*") "key diagnostics do not expose bundle env names with values"
-    Assert-True ([bool]$keyDiagnostics.tushare.configured) "key diagnostics mark Tushare configured"
-    Assert-True (([string]$keyDiagnostics.tushare.masked).Length -gt 0) "key diagnostics show Tushare masked value"
-    Write-SmokeLog "PASS: Tushare configured/masked only; API permission or quota is not an install failure"
-    $newsTest = Invoke-SmokeRequest -Uri "http://127.0.0.1:$port/api/terminal/newsapi/test" -Method "POST" -Body @{}
-    Assert-True ($newsTest.message_zh -notlike "*key_missing*") "NewsAPI test is not key_missing"
-    Assert-True ($newsTest.message_zh -notlike "*未配置*") "NewsAPI test is not unconfigured"
-  }
-
-  $terminal = Invoke-WebRequest -UseBasicParsing -Uri "http://127.0.0.1:$port/terminal" -TimeoutSec 10
+  $terminal = Invoke-SmokeWebRequest -Uri "http://127.0.0.1:$port/terminal" -TimeoutSec $TimeoutSeconds
   Assert-True ($terminal.StatusCode -eq 200) "/terminal returns 200"
   if ($terminal.Content -like "*frontend*" -and $terminal.Content -like "*npm run build*") {
     throw "/terminal still shows the missing frontend build page."
   }
-  $legacy = Invoke-WebRequest -UseBasicParsing -Uri "http://127.0.0.1:$port/legacy" -TimeoutSec 10
+  $legacy = Invoke-SmokeWebRequest -Uri "http://127.0.0.1:$port/legacy" -TimeoutSec $TimeoutSeconds
   Assert-True ($legacy.StatusCode -eq 200) "/legacy returns 200"
 
   if ($RunBrowserSmoke) {
@@ -207,14 +298,12 @@ try {
       Write-SmokeLog "Starting Playwright browser smoke against installed terminal."
       Push-Location (Join-Path $ProjectRoot "frontend")
       try {
-        $env:SN_E2E_SKIP_WEBSERVER = "1"
-        $env:PLAYWRIGHT_BASE_URL = "http://127.0.0.1:$port/terminal/"
+        Set-SmokeEnvironmentValue "SN_E2E_SKIP_WEBSERVER" "1"
+        Set-SmokeEnvironmentValue "PLAYWRIGHT_BASE_URL" "http://127.0.0.1:$port/terminal/"
         & $nodeExe ".\node_modules\@playwright\test\cli.js" test --project=chromium
         $playwrightExitCode = $LASTEXITCODE
         Assert-True ($playwrightExitCode -eq 0) "Playwright browser smoke passed with exit code 0 (actual: $playwrightExitCode)"
       } finally {
-        Remove-Item Env:\SN_E2E_SKIP_WEBSERVER -ErrorAction SilentlyContinue
-        Remove-Item Env:\PLAYWRIGHT_BASE_URL -ErrorAction SilentlyContinue
         Pop-Location
       }
     } else {
@@ -233,24 +322,17 @@ try {
   $save = Invoke-SmokeRequest -Uri "http://127.0.0.1:$port/api/terminal/settings/secrets" -Method "POST" -Body @{
     SN_ALPHA_VANTAGE_KEY = $mockAlpha
     SN_NEWSAPI_KEY = $mockNews
-  }
+  } -TimeoutSec $TimeoutSeconds
   $saveText = $save | ConvertTo-Json -Depth 10
   Assert-TextNotContains -Text $saveText -Forbidden @($mockAlpha, $mockNews) -Scope "settings/secrets response"
   $secretFile = Join-Path $UserData "config\secrets.json"
-  Assert-True (Test-Path $secretFile) "mock secrets.json is stored under user data"
+  Assert-True (Test-Path $secretFile) "mock secrets.json is stored under smoke data dir"
 
-  $reset = Invoke-SmokeRequest -Uri "http://127.0.0.1:$port/api/terminal/settings/reset" -Method "POST"
+  $reset = Invoke-SmokeRequest -Uri "http://127.0.0.1:$port/api/terminal/settings/reset" -Method "POST" -TimeoutSec $TimeoutSeconds
   $resetText = $reset | ConvertTo-Json -Depth 10
   Assert-TextNotContains -Text $resetText -Forbidden @($mockAlpha, $mockNews) -Scope "settings/reset response"
   $secretContent = if (Test-Path $secretFile) { Get-Content $secretFile -Raw } else { "" }
   Assert-TextNotContains -Text $secretContent -Forbidden @($mockAlpha, $mockNews) -Scope "secrets.json after reset"
-  if ($ExpectPrivateBundleKeys) {
-    $afterReset = Invoke-SmokeRequest -Uri "http://127.0.0.1:$port/api/terminal/settings/status"
-    Assert-True ([bool]$afterReset.alpha_vantage_configured) "reset restores or retains Alpha Vantage private default"
-    Assert-True ([bool]$afterReset.newsapi_configured) "reset restores or retains NewsAPI private default"
-    Assert-True ([bool]$afterReset.tushare_configured) "reset restores or retains Tushare private default"
-    Assert-True (([string]$afterReset.tushare_masked).Length -gt 0) "reset restores Tushare masked value"
-  }
 
   $logText = ""
   if (Test-Path (Join-Path $UserData "logs")) {
@@ -259,14 +341,10 @@ try {
     }
   }
   Assert-TextNotContains -Text $logText -Forbidden @($mockAlpha, $mockNews) -Scope "logs"
-  if ($ExpectPrivateBundleKeys) {
-    & (Join-Path $ProjectRoot "scripts\scan_runtime_secrets.ps1")
-    Assert-True ($LASTEXITCODE -eq 0) "runtime secret scan passed"
-  }
 
   Write-SmokeLog "Requesting backend shutdown via Terminal API."
   $shutdownAttempted = $true
-  $shutdown = Invoke-SmokeRequest -Uri "http://127.0.0.1:$port/api/terminal/system/shutdown" -Method "POST" -Body @{ reason = "installed_smoke" } -TimeoutSec 10
+  $shutdown = Invoke-SmokeRequest -Uri "http://127.0.0.1:$port/api/terminal/system/shutdown" -Method "POST" -Body @{ reason = "installed_smoke" } -TimeoutSec $TimeoutSeconds
   Assert-True ($shutdown.http_shutdown_scheduled -eq $true) "shutdown API scheduled HTTP server shutdown"
   Assert-True ($shutdown.accepting_new_tasks -eq $false) "shutdown API stopped new task acceptance"
   Assert-PortReleased -Port $port -TimeoutSeconds 20
@@ -301,6 +379,11 @@ try {
   if ($process -and -not $process.HasExited) {
     Stop-Process -Id $process.Id -Force
   }
+  Restore-SmokeEnvironment
+  if ($CreatedTempDataDir -and (Test-Path $TempDataDirPath)) {
+    Remove-Item -LiteralPath $TempDataDirPath -Recurse -Force -ErrorAction SilentlyContinue
+    Write-SmokeLog "Removed temporary smoke data dir: $TempDataDirPath"
+  }
 }
 
 if (-not $KeepInstalled) {
@@ -316,7 +399,11 @@ if (-not $KeepInstalled) {
   Assert-True ($uninstallProcess.ExitCode -eq 0) "uninstaller exit code is 0"
   Start-Sleep -Seconds 2
   Assert-True (-not (Test-Path $InstallDir)) "install directory removed after uninstall"
-  Assert-True (Test-Path $UserData) "user data directory retained after uninstall"
+  if ($CreatedTempDataDir) {
+    Assert-True (-not (Test-Path $TempDataDirPath)) "temporary user data directory removed after smoke"
+  } else {
+    Assert-True (Test-Path $UserData) "user data directory retained after uninstall"
+  }
   if (Test-Path $StartMenuShortcut) {
     throw "start menu shortcut still exists after uninstall: $StartMenuShortcut"
   }

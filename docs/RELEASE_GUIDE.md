@@ -54,14 +54,20 @@ Build the install-ready package:
 Run installed smoke after the installer is created:
 
 ```powershell
-.\packaging\smoke_installed.ps1 -RunBrowserSmoke
+.\packaging\smoke_installed.ps1 `
+  -UseTempDataDir `
+  -ApiPort 8765 `
+  -TimeoutSeconds 60 `
+  -RunBrowserSmoke
 ```
 
 The smoke validates:
 
 - installer success
 - first launch and API availability
+- isolated `SN_DATA_DIR` / `SN_INSIGHT_DATA_DIR` when `-UseTempDataDir` or `-DataDir` is supplied
 - explicit unconfigured provider status on first launch
+- `/api/terminal/predictions` returns blocked/empty output with `sample_data_used=false`, `baseline_used=false`, and `customer_prediction_generated=false` when no provider keys or real data are configured
 - masked settings/key diagnostics when the local user configures keys
 - masked settings/key diagnostics
 - `/terminal` and `/legacy`
@@ -70,6 +76,8 @@ The smoke validates:
 - no complete key leakage in runtime logs/cache/outputs
 
 Smoke setup and uninstall logs are written under `%TEMP%\SNInsightTerminalSmoke`, not the release directory.
+
+`-ExpectPrivateBundleKeys` is disabled and must not be used as an acceptance path. Provider keys stay in the installed user's local config only; the smoke clears provider key environment variables before launching the terminal.
 
 ## Release Artifacts
 

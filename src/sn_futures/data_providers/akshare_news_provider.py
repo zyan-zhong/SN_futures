@@ -2,7 +2,13 @@ from __future__ import annotations
 
 import hashlib
 import importlib
+import json
+import multiprocessing as mp
+import os
 import re
+import subprocess
+import sys
+import time
 from dataclasses import replace
 from datetime import datetime
 from typing import Any, Iterable, Mapping
@@ -19,6 +25,73 @@ from .base import BaseProvider, ProviderResult
 
 AKSHARE_NEWS_SCHEMA_VERSION = "akshare-news-provider-v1"
 _LOCAL_PATH_RE = re.compile(r"[A-Za-z]:[\\/][^\s,;\"']+")
+_DEFAULT_CALL_TIMEOUT = object()
+_DEFAULT_MAX_ROWS = object()
+_REAL_AKSHARE_CALL_TIMEOUT_SECONDS = 20.0
+
+
+class _AkShareCallTimeout(RuntimeError):
+    pass
+
+
+_AKSHARE_SUBPROCESS_CODE = r"""
+import json
+import sys
+import warnings
+
+warnings.filterwarnings("ignore")
+try:
+    sys.stdout.reconfigure(encoding="utf-8")
+except Exception:
+    pass
+
+import akshare as ak
+import pandas as pd
+
+function_name = sys.argv[1]
+params_list = json.loads(sys.argv[2])
+if isinstance(params_list, dict):
+    params_list = [params_list]
+fn = getattr(ak, function_name)
+rows = []
+errors = []
+for params in params_list:
+    try:
+        payload = fn(**params)
+        if isinstance(payload, pd.DataFrame):
+            frame = payload
+        elif isinstance(payload, list):
+            frame = pd.DataFrame(payload)
+        else:
+            frame = pd.DataFrame([])
+        if not frame.empty:
+            rows.extend(frame.to_dict(orient="records"))
+    except Exception as exc:
+        errors.append(str(exc))
+print(json.dumps({"rows": rows, "errors": errors}, ensure_ascii=False, default=str))
+"""
+
+
+def _rows_from_payload(payload: Any) -> list[dict[str, Any]]:
+    frame = payload if isinstance(payload, pd.DataFrame) else pd.DataFrame(payload if isinstance(payload, list) else [])
+    if frame.empty:
+        return []
+    return [dict(row) for row in frame.to_dict(orient="records") if isinstance(row, Mapping)]
+
+
+def _injected_akshare_source_worker(result_queue: Any, ak_module: Any, function_name: str, params_list: list[dict[str, Any]]) -> None:
+    rows: list[dict[str, Any]] = []
+    errors: list[str] = []
+    try:
+        fn = getattr(ak_module, function_name)
+        for params in params_list:
+            try:
+                rows.extend(_rows_from_payload(fn(**params)))
+            except Exception as exc:
+                errors.append(str(exc))
+        result_queue.put({"ok": True, "rows": rows, "errors": errors})
+    except Exception as exc:
+        result_queue.put({"ok": False, "error": str(exc), "rows": rows, "errors": errors})
 
 
 def _now() -> str:
@@ -149,9 +222,46 @@ class AkShareNewsProvider(BaseProvider):
     raw_filename = "akshare_news_raw.json"
     normalized_filename = "akshare_news_normalized.json"
 
-    def __init__(self, *, ak_module: Any | None = None, secret_values: Iterable[str] = ()) -> None:
+    def __init__(
+        self,
+        *,
+        ak_module: Any | None = None,
+        secret_values: Iterable[str] = (),
+        call_timeout_seconds: float | None | object = _DEFAULT_CALL_TIMEOUT,
+        max_rows_per_source: int | None = None,
+    ) -> None:
         self.ak_module = ak_module
         self._secret_values = tuple(str(value) for value in secret_values if str(value or ""))
+        if call_timeout_seconds is _DEFAULT_CALL_TIMEOUT:
+            self.call_timeout_seconds = None if ak_module is not None else _REAL_AKSHARE_CALL_TIMEOUT_SECONDS
+        elif call_timeout_seconds is None:
+            self.call_timeout_seconds = None
+        else:
+            self.call_timeout_seconds = max(float(call_timeout_seconds), 0.01)
+        if max_rows_per_source is None:
+            self.max_rows_per_source: int | None = None
+        else:
+            self.max_rows_per_source = max(int(max_rows_per_source), 1)
+
+    def fetch(
+        self,
+        *,
+        persist: bool = False,
+        output_dir: Any | None = None,
+        call_timeout_seconds: float | None | object = _DEFAULT_CALL_TIMEOUT,
+        max_rows_per_source: int | None | object = _DEFAULT_MAX_ROWS,
+    ) -> ProviderResult:
+        old_timeout = self.call_timeout_seconds
+        old_max_rows = self.max_rows_per_source
+        if call_timeout_seconds is not _DEFAULT_CALL_TIMEOUT:
+            self.call_timeout_seconds = None if call_timeout_seconds is None else max(float(call_timeout_seconds), 0.01)
+        if max_rows_per_source is not _DEFAULT_MAX_ROWS:
+            self.max_rows_per_source = None if max_rows_per_source is None else max(int(max_rows_per_source), 1)
+        try:
+            return super().fetch(persist=persist, output_dir=output_dir)
+        finally:
+            self.call_timeout_seconds = old_timeout
+            self.max_rows_per_source = old_max_rows
 
     def secret_values(self) -> Iterable[str]:
         return self._secret_values
@@ -166,9 +276,11 @@ class AkShareNewsProvider(BaseProvider):
             return "missing_required_columns"
         if "no_rows" in lower:
             return "no_rows"
+        if "request_timeout" in lower or "timed out" in lower or "timeout" in lower:
+            return "request_timeout"
         if "rate" in lower or "limit" in lower or "429" in lower:
             return "rate_limited"
-        if "timeout" in lower or "connection" in lower or "network" in lower:
+        if "connection" in lower or "network" in lower:
             return "network_failed"
         return "request_failed"
 
@@ -226,20 +338,25 @@ class AkShareNewsProvider(BaseProvider):
         provider = str(spec["provider"])
         fn = getattr(ak, function_name, None)
         if not callable(fn):
-            return [], self._source_status(spec, fetched_at, success=False, error_code="akshare_api_changed", message=f"AKShare function missing: {function_name}")
+            return [], self._source_status(
+                spec,
+                fetched_at,
+                success=False,
+                error_code="akshare_api_changed",
+                message=f"AKShare function missing: {function_name}",
+            )
 
+        source_started = time.perf_counter()
         rows: list[dict[str, Any]] = []
-        errors: list[str] = []
-        for params in spec.get("params", []):
-            try:
-                payload = fn(**dict(params))
-            except Exception as exc:
-                errors.append(_safe_error(exc, self.secret_values()))
-                continue
-            frame = payload if isinstance(payload, pd.DataFrame) else pd.DataFrame(payload if isinstance(payload, list) else [])
-            if frame.empty:
-                continue
-            for row in frame.to_dict(orient="records"):
+        errors: list[dict[str, Any]] = []
+        raw_row_count = 0
+        limited = False
+        params_list = [dict(params) for params in spec.get("params", []) if isinstance(params, Mapping)]
+
+        def append_call_rows(call_rows: list[dict[str, Any]]) -> None:
+            nonlocal raw_row_count, limited
+            raw_row_count += len(call_rows)
+            for row in call_rows:
                 if not isinstance(row, Mapping):
                     continue
                 item = dict(row)
@@ -248,13 +365,148 @@ class AkShareNewsProvider(BaseProvider):
                 item["_akshare_url"] = str(spec["url"])
                 item["_source_published_at"] = _published_at(item)
                 rows.append(item)
+                if self.max_rows_per_source is not None and len(rows) >= self.max_rows_per_source:
+                    limited = True
+                    break
 
+        if self.call_timeout_seconds is not None:
+            try:
+                source_result = self._call_akshare_source_rows(ak, function_name, params_list)
+                append_call_rows(source_result.get("rows", []))
+                for message in source_result.get("errors", []):
+                    sanitized = _safe_error(message, self.secret_values())
+                    errors.append({"error_code": self.classify_error(sanitized), "message": sanitized, "timed_out": False})
+            except _AkShareCallTimeout as exc:
+                errors.append({"error_code": "request_timeout", "message": _safe_error(exc, self.secret_values()), "timed_out": True})
+            except Exception as exc:
+                message = _safe_error(exc, self.secret_values())
+                errors.append({"error_code": self.classify_error(message), "message": message, "timed_out": False})
+        else:
+            for params in params_list:
+                try:
+                    call_rows = self._call_akshare_rows(ak, function_name, dict(params))
+                except Exception as exc:
+                    message = _safe_error(exc, self.secret_values())
+                    errors.append({"error_code": self.classify_error(message), "message": message, "timed_out": False})
+                    continue
+                if not call_rows:
+                    continue
+                append_call_rows(call_rows)
+                if limited:
+                    break
+
+        elapsed = round(time.perf_counter() - source_started, 3)
+        timed_out = any(bool(item.get("timed_out")) for item in errors)
         if rows:
-            return rows, self._source_status(spec, fetched_at, success=True, error_code="", row_count=len(rows), message=f"{function_name} returned {len(rows)} rows.")
+            status = self._source_status(
+                spec,
+                fetched_at,
+                success=True,
+                error_code="",
+                row_count=len(rows),
+                raw_row_count=raw_row_count,
+                message=f"{function_name} returned {len(rows)} rows.",
+                elapsed_seconds=elapsed,
+                timed_out=timed_out,
+                limited=limited,
+            )
+            if errors:
+                status["partial_param_failures"] = errors
+            return rows, status
         if errors:
-            error_code = self.classify_error(" ".join(errors))
-            return [], self._source_status(spec, fetched_at, success=False, error_code=error_code, message="; ".join(errors))
-        return [], self._source_status(spec, fetched_at, success=False, error_code="no_rows", message=f"{function_name} returned no rows.")
+            error_code = "request_timeout" if all(item.get("error_code") == "request_timeout" for item in errors) else self.classify_error(" ".join(str(item.get("message") or "") for item in errors))
+            return [], self._source_status(
+                spec,
+                fetched_at,
+                success=False,
+                error_code=error_code,
+                message="; ".join(str(item.get("message") or item.get("error_code") or "") for item in errors),
+                elapsed_seconds=elapsed,
+                timed_out=timed_out,
+                raw_row_count=raw_row_count,
+                limited=limited,
+            )
+        return [], self._source_status(
+            spec,
+            fetched_at,
+            success=False,
+            error_code="no_rows",
+            message=f"{function_name} returned no rows.",
+            elapsed_seconds=elapsed,
+            raw_row_count=raw_row_count,
+            limited=limited,
+        )
+
+    def _call_akshare_rows(self, ak: Any, function_name: str, params: dict[str, Any]) -> list[dict[str, Any]]:
+        fn = getattr(ak, function_name)
+        return _rows_from_payload(fn(**params))
+
+    def _call_akshare_source_rows(self, ak: Any, function_name: str, params_list: list[dict[str, Any]]) -> dict[str, list[Any]]:
+        if self.ak_module is None:
+            return self._call_real_akshare_source_subprocess(function_name, params_list)
+        return self._call_injected_akshare_source_process(ak, function_name, params_list)
+
+    def _call_real_akshare_source_subprocess(self, function_name: str, params_list: list[dict[str, Any]]) -> dict[str, list[Any]]:
+        env = dict(os.environ)
+        env["PYTHONIOENCODING"] = "utf-8"
+        try:
+            completed = subprocess.run(
+                [sys.executable, "-c", _AKSHARE_SUBPROCESS_CODE, function_name, json.dumps(params_list, ensure_ascii=False)],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=self.call_timeout_seconds,
+                env=env,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise _AkShareCallTimeout(f"request_timeout: {function_name} timed out after {self.call_timeout_seconds}s") from exc
+        if completed.returncode != 0:
+            message = (completed.stderr or completed.stdout or "akshare subprocess failed").strip()
+            raise RuntimeError(message[:1200])
+        text = (completed.stdout or "").strip()
+        if not text:
+            return {"rows": [], "errors": []}
+        try:
+            payload = json.loads(text)
+        except json.JSONDecodeError:
+            payload = json.loads(text.splitlines()[-1])
+        if isinstance(payload, list):
+            return {"rows": [dict(row) for row in payload if isinstance(row, Mapping)], "errors": []}
+        if isinstance(payload, Mapping):
+            rows = payload.get("rows", [])
+            errors = payload.get("errors", [])
+            return {
+                "rows": [dict(row) for row in rows if isinstance(row, Mapping)] if isinstance(rows, list) else [],
+                "errors": [str(item) for item in errors] if isinstance(errors, list) else [],
+            }
+        return {"rows": [], "errors": []}
+
+    def _call_injected_akshare_source_process(self, ak: Any, function_name: str, params_list: list[dict[str, Any]]) -> dict[str, list[Any]]:
+        ctx = mp.get_context("spawn")
+        result_queue = ctx.Queue(maxsize=1)
+        process = ctx.Process(target=_injected_akshare_source_worker, args=(result_queue, ak, function_name, params_list))
+        process.start()
+        process.join(float(self.call_timeout_seconds or 0.01))
+        if process.is_alive():
+            process.terminate()
+            process.join(2.0)
+            if process.is_alive() and hasattr(process, "kill"):
+                process.kill()
+                process.join(2.0)
+            raise _AkShareCallTimeout(f"request_timeout: {function_name} timed out after {self.call_timeout_seconds}s")
+        try:
+            payload = result_queue.get(timeout=2.0)
+        except Exception as exc:
+            raise RuntimeError(f"{function_name} returned no subprocess result") from exc
+        if not payload.get("ok"):
+            raise RuntimeError(str(payload.get("error") or "akshare injected call failed"))
+        rows = payload.get("rows")
+        errors = payload.get("errors")
+        return {
+            "rows": [dict(row) for row in rows if isinstance(row, Mapping)] if isinstance(rows, list) else [],
+            "errors": [str(item) for item in errors] if isinstance(errors, list) else [],
+        }
 
     def _source_status(
         self,
@@ -265,8 +517,14 @@ class AkShareNewsProvider(BaseProvider):
         error_code: str,
         message: str,
         row_count: int = 0,
+        raw_row_count: int = 0,
+        elapsed_seconds: float = 0.0,
+        timed_out: bool = False,
+        limited: bool = False,
     ) -> dict[str, Any]:
+        sanitized_message = _safe_error(message, self.secret_values())
         return {
+            "source_id": str(spec.get("name") or spec.get("provider") or self.provider_id),
             "name": str(spec.get("name") or spec.get("provider") or self.provider_id),
             "provider_id": str(spec.get("provider") or self.provider_id),
             "function_name": str(spec.get("function") or ""),
@@ -274,9 +532,15 @@ class AkShareNewsProvider(BaseProvider):
             "status_code": "success" if success else error_code,
             "error_code": "" if success else error_code,
             "row_count": int(row_count),
+            "raw_row_count": int(raw_row_count or row_count),
             "from_cache": False,
             "fetched_at": fetched_at,
-            "message": _safe_error(message, self.secret_values()),
+            "message": sanitized_message,
+            "error_message_sanitized": "" if success else sanitized_message,
+            "elapsed_seconds": float(elapsed_seconds),
+            "timed_out": bool(timed_out),
+            "max_rows_per_source": self.max_rows_per_source,
+            "limited": bool(limited),
         }
 
     def extract_rows(self, raw_response: Any) -> list[dict[str, Any]]:
@@ -367,8 +631,10 @@ class AkShareNewsProvider(BaseProvider):
         error_codes = [str(item.get("error_code") or item.get("status_code") or "") for item in statuses if item]
         if error_codes and all(code == "akshare_api_changed" for code in error_codes):
             code = "akshare_api_changed"
-        elif any(code in {"rate_limited", "network_failed", "request_failed"} for code in error_codes):
-            code = next(code for code in error_codes if code in {"rate_limited", "network_failed", "request_failed"})
+        elif error_codes and all(code == "request_timeout" for code in error_codes):
+            code = "request_timeout"
+        elif any(code in {"request_timeout", "rate_limited", "network_failed", "request_failed"} for code in error_codes):
+            code = next(code for code in error_codes if code in {"request_timeout", "rate_limited", "network_failed", "request_failed"})
         else:
             code = "no_rows"
         reason = "; ".join(str(item.get("message") or item.get("error_code") or "") for item in statuses if item.get("message") or item.get("error_code"))
@@ -399,6 +665,8 @@ class AkShareNewsProvider(BaseProvider):
             raw_payload=raw_payload,
         )
         source_statuses = raw_payload.get("source_statuses") if isinstance(raw_payload, Mapping) else []
+        source_status_list = source_statuses if isinstance(source_statuses, list) else []
+        partial_failures = [dict(item) for item in source_status_list if isinstance(item, Mapping) and not item.get("success")]
         published_count = sum(1 for row in normalized_rows if row.get("source_published_at"))
         normalized_count = len(normalized_rows)
         manifest.update(
@@ -406,7 +674,11 @@ class AkShareNewsProvider(BaseProvider):
                 "akshare_news_schema_version": AKSHARE_NEWS_SCHEMA_VERSION,
                 "cache_status": "cache" if from_cache else ("remote" if rows or normalized_rows else "missing"),
                 "source_published_at_coverage": round(published_count / normalized_count, 4) if normalized_count else 0.0,
-                "source_statuses": source_statuses if isinstance(source_statuses, list) else [],
+                "source_statuses": source_status_list,
+                "partial_source_failures": partial_failures,
+                "all_sources_failed": bool(source_status_list) and all(not bool(item.get("success")) for item in source_status_list if isinstance(item, Mapping)),
+                "call_timeout_seconds": self.call_timeout_seconds,
+                "max_rows_per_source": self.max_rows_per_source,
                 "feature_store_written": False,
                 "training_invoked": False,
                 "backtest_invoked": False,
@@ -420,10 +692,18 @@ class AkShareNewsProvider(BaseProvider):
         kwargs["sanitized_error"] = sanitized
         result = super()._error_result(**kwargs)
         manifest = dict(result.manifest)
+        source_statuses = manifest.get("source_statuses") if isinstance(manifest, Mapping) else []
+        source_status_list = source_statuses if isinstance(source_statuses, list) else []
+        partial_failures = [dict(item) for item in source_status_list if isinstance(item, Mapping) and not item.get("success")]
         manifest.update(
             {
                 "akshare_news_schema_version": AKSHARE_NEWS_SCHEMA_VERSION,
                 "cache_status": "missing" if not result.rows else manifest.get("cache_status", "remote"),
+                "source_statuses": source_status_list,
+                "partial_source_failures": partial_failures,
+                "all_sources_failed": bool(source_status_list) and all(not bool(item.get("success")) for item in source_status_list if isinstance(item, Mapping)),
+                "call_timeout_seconds": self.call_timeout_seconds,
+                "max_rows_per_source": self.max_rows_per_source,
                 "feature_store_written": False,
                 "training_invoked": False,
                 "backtest_invoked": False,

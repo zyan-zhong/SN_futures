@@ -131,6 +131,7 @@ class BaseProvider(ABC):
                 fetched_at=fetched_at,
                 from_cache=from_cache,
                 source_url=source_url,
+                raw_payload=raw_payload,
             )
 
         if not validation.get("success", False):
@@ -142,6 +143,7 @@ class BaseProvider(ABC):
                 source_url=source_url,
                 status_code=str(validation.get("status_code") or ""),
                 rows=rows,
+                raw_payload=raw_payload,
             )
 
         source_timestamp = self.source_timestamp(normalized_rows)
@@ -278,6 +280,7 @@ class BaseProvider(ABC):
         source_url: str = "",
         status_code: str = "",
         rows: list[dict[str, Any]] | None = None,
+        raw_payload: Any | None = None,
     ) -> ProviderResult:
         rate_limited = error_code == "rate_limited"
         manifest = self.build_manifest(
@@ -289,7 +292,7 @@ class BaseProvider(ABC):
             stale=False,
             rate_limited=rate_limited,
             source_url_sanitized=sanitize_url(source_url or self.source_url, self.secret_values()),
-            raw_payload={},
+            raw_payload={} if raw_payload is None else raw_payload,
         )
         manifest["blocking_reasons"] = [sanitize_text(sanitized_error, self.secret_values())] if sanitized_error else [error_code]
         return ProviderResult(

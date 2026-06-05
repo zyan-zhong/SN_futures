@@ -280,100 +280,38 @@ def _public_policy_articles() -> tuple[list[dict[str, Any]], list[SourceStatus]]
     return rows, statuses
 
 
-def _akshare_news_articles() -> tuple[list[dict[str, Any]], list[SourceStatus]]:
-    rows: list[dict[str, Any]] = []
+def _akshare_news_articles(ak_module: Any | None = None) -> tuple[list[dict[str, Any]], list[SourceStatus]]:
+    from .data_providers.akshare_news_provider import AkShareNewsProvider, provider_articles_from_result
+
+    result = AkShareNewsProvider(ak_module=ak_module).fetch()
+    rows = provider_articles_from_result(result)
     statuses: list[SourceStatus] = []
-    try:
-        import akshare as ak  # type: ignore
-    except Exception as exc:
-        return [], [
+    source_statuses = result.manifest.get("source_statuses") if isinstance(result.manifest, dict) else []
+    if isinstance(source_statuses, list):
+        for item in source_statuses:
+            if not isinstance(item, dict):
+                continue
+            statuses.append(
+                SourceStatus(
+                    name=str(item.get("name") or item.get("provider_id") or "akshare_news"),
+                    enabled=True,
+                    success=bool(item.get("success")),
+                    from_cache=bool(item.get("from_cache")),
+                    fetched_at=str(item.get("fetched_at") or result.fetched_at or "") or None,
+                    message=str(item.get("message") or item.get("error_code") or item.get("status_code") or ""),
+                )
+            )
+    if not statuses:
+        statuses.append(
             SourceStatus(
                 name="akshare_news",
                 enabled=True,
-                success=False,
-                from_cache=False,
-                fetched_at=None,
-                message=f"akshare 新闻接口不可用：{exc}",
-            )
-        ]
-
-    def _row_to_article(row: dict[str, Any], *, source: str, url: str) -> dict[str, Any] | None:
-        title = str(row.get("标题") or row.get("title") or row.get("内容") or "")[:180]
-        body = str(row.get("内容") or row.get("摘要") or row.get("summary") or title)
-        text = f"{title} {body}"
-        if not _contains_policy_keyword(text):
-            return None
-        date = str(row.get("发布日期") or row.get("date") or pd.Timestamp.now(tz="Asia/Hong_Kong").date())
-        tm = str(row.get("发布时间") or row.get("time") or "00:00:00")
-        published = date if "T" in date else f"{date}T{tm}"
-        return {
-            "title": title or body[:120],
-            "description": body[:420],
-            "content": body[:800],
-            "url": url,
-            "publishedAt": published,
-            "source": {"name": source},
-            "provider": source,
-        }
-
-    try:
-        shmet_rows = []
-        for symbol in ("锡", "小金属", "财经"):
-            try:
-                frame = ak.futures_news_shmet(symbol=symbol)
-            except Exception:
-                continue
-            if hasattr(frame, "to_dict"):
-                shmet_rows.extend(frame.head(30).to_dict(orient="records"))
-        seen = set()
-        for row in shmet_rows:
-            article = _row_to_article(
-                row,
-                source="akshare_shmet",
-                url="https://www.shmet.com/newsFlash/newsFlash.html?searchKeyword=%E9%94%A1",
-            )
-            if not article:
-                continue
-            key = article["title"]
-            if key in seen:
-                continue
-            seen.add(key)
-            rows.append(article)
-        statuses.append(
-            SourceStatus(
-                name="akshare_shmet_news",
-                enabled=True,
-                success=bool(seen),
-                from_cache=False,
-                fetched_at=pd.Timestamp.now(tz="Asia/Hong_Kong").isoformat(),
-                message=f"上海金属网/akshare 快讯命中 {len(seen)} 条沪锡相关记录。" if seen else "上海金属网/akshare 快讯暂未命中沪锡关键词。",
+                success=bool(result.success),
+                from_cache=bool(result.from_cache),
+                fetched_at=result.fetched_at or None,
+                message=result.sanitized_error or ("AKShare news provider returned rows." if result.success else result.error_code),
             )
         )
-    except Exception as exc:
-        statuses.append(SourceStatus("akshare_shmet_news", True, False, False, None, str(exc)))
-
-    try:
-        frame = ak.stock_info_global_cls(symbol="全部")
-        cls_count = 0
-        if hasattr(frame, "to_dict"):
-            for row in frame.head(50).to_dict(orient="records"):
-                article = _row_to_article(row, source="akshare_cls", url="https://www.cls.cn/telegraph")
-                if article:
-                    rows.append(article)
-                    cls_count += 1
-        statuses.append(
-            SourceStatus(
-                name="akshare_cls_news",
-                enabled=True,
-                success=cls_count > 0,
-                from_cache=False,
-                fetched_at=pd.Timestamp.now(tz="Asia/Hong_Kong").isoformat(),
-                message=f"财联社/akshare 快讯命中 {cls_count} 条沪锡相关记录。" if cls_count else "财联社/akshare 快讯暂未命中沪锡关键词。",
-            )
-        )
-    except Exception as exc:
-        statuses.append(SourceStatus("akshare_cls_news", True, False, False, None, str(exc)))
-
     return rows, statuses
 
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from .base import BaseProvider
+from .akshare_news_provider import AkShareNewsProvider
 from .newsapi_unified_provider import NewsApiNewsProvider
 from .sina_unified_provider import SinaRealtimeQuoteProvider
 
@@ -9,6 +10,7 @@ def build_provider_registry() -> dict[str, BaseProvider]:
     providers: list[BaseProvider] = [
         SinaRealtimeQuoteProvider(),
         NewsApiNewsProvider(),
+        AkShareNewsProvider(),
     ]
     return {provider.provider_id: provider for provider in providers}
 

@@ -34,6 +34,7 @@
 - [ ] 回测原因：无真实历史 bars、无 signal manifest、sample_data_used 或 baseline_used 时 blocked，不生成 equity curve。
 - [ ] 报告免责声明：所有报告、预测、回测和风险情景输出均清晰标注“研究参考，不构成投资建议”。
 - [ ] 发行包排除：`.env`、`secrets.json`、private keys、runtime cache、SQLite、logs、outputs、e2e screenshots 和安装包构建产物不进入源码仓库或安装包。
+- [ ] 安装后 smoke：使用隔离 `SN_DATA_DIR` / `SN_INSIGHT_DATA_DIR`；首次启动时 provider key 均显示未配置；`/api/terminal/predictions` 在无 key/无真实数据时返回 blocked/empty，且 `sample_data_used=false`、`baseline_used=false`、`customer_prediction_generated=false`。
 
 ## 终端页面
 

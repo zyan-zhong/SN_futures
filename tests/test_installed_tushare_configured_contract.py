@@ -6,19 +6,30 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_installed_smoke_requires_tushare_configured_when_private_bundle_expected() -> None:
+def test_installed_smoke_requires_all_provider_keys_unconfigured_in_isolated_mode() -> None:
     script = (ROOT / "packaging" / "smoke_installed.ps1").read_text(encoding="utf-8")
 
-    assert "$settingsStatus.tushare_configured" in script
-    assert "$settingsStatus.tushare_masked" in script
-    assert '([string]$settingsStatus.tushare_masked).Length -gt 0' in script
-    assert '([string]$keyDiagnostics.tushare.masked).Length -gt 0' in script
-    assert '([string]$afterReset.tushare_masked).Length -gt 0' in script
-    assert "Tushare source is private_bundle/user_secrets/env" in script
-    assert "reset restores or retains Tushare private default" in script
+    assert "$settingsStatus.alpha_vantage_configured -eq $false" in script
+    assert "$settingsStatus.newsapi_configured -eq $false" in script
+    assert "$settingsStatus.tushare_configured -eq $false" in script
+    assert "$settingsStatus.local_api_provider_configured -eq $false" in script
+    assert "Alpha Vantage is unconfigured in isolated smoke" in script
+    assert "NewsAPI is unconfigured in isolated smoke" in script
+    assert "Tushare is unconfigured in isolated smoke" in script
+    assert "Local API Provider is unconfigured in isolated smoke" in script
 
 
-def test_installed_smoke_does_not_require_tushare_network_success() -> None:
+def test_installed_smoke_clears_provider_key_environment_and_does_not_run_live_key_tests() -> None:
     script = (ROOT / "packaging" / "smoke_installed.ps1").read_text(encoding="utf-8")
 
-    assert "Tushare configured/masked only; API permission or quota is not an install failure" in script
+    for name in (
+        "SN_ALPHA_VANTAGE_KEY",
+        "SN_NEWSAPI_KEY",
+        "SN_TUSHARE_TOKEN",
+        "SN_LOCAL_API_PROVIDER_TOKEN",
+        "SN_MANAGED_PROXY_TOKEN",
+        "SN_MANAGED_DATA_PROXY_TOKEN",
+    ):
+        assert name in script
+    assert "/api/terminal/newsapi/test" not in script
+    assert "Tushare configured/masked only; API permission or quota is not an install failure" not in script

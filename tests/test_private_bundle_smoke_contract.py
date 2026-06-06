@@ -42,6 +42,13 @@ class InstallerSmokeContractTest(unittest.TestCase):
         self.assertIn("if ($CreatedTempDataDir", script)
         self.assertNotIn("Remove-Item -LiteralPath $UserData -Recurse -Force", script)
 
+    def test_smoke_script_treats_empty_prediction_cards_object_as_empty(self) -> None:
+        script = Path("packaging/smoke_installed.ps1").read_text(encoding="utf-8")
+
+        self.assertIn("function Test-IsEmptySmokeObject", script)
+        self.assertIn("Get-Member -MemberType NoteProperty", script)
+        self.assertIn("Test-IsEmptySmokeObject $cards", script)
+
 
 if __name__ == "__main__":
     unittest.main()

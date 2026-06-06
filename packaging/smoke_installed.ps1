@@ -159,6 +159,32 @@ function Assert-NoSNInsightOrphanProcess {
   Write-SmokeLog "PASS: no SNInsightTerminal orphan process remains"
 }
 
+function Stop-SmokeProcessIfRunning {
+  param(
+    [object]$Process,
+    [int]$TimeoutSeconds = 20
+  )
+  if (-not $Process) {
+    return
+  }
+  $exitDeadline = (Get-Date).AddSeconds($TimeoutSeconds)
+  while (-not $Process.HasExited -and (Get-Date) -lt $exitDeadline) {
+    Start-Sleep -Milliseconds 300
+    $Process.Refresh()
+  }
+  if ($Process.HasExited) {
+    Write-SmokeLog "PASS: installed process exited after shutdown API"
+    return
+  }
+  Write-SmokeLog "WARN: installed process still running after shutdown API; forcing cleanup."
+  Stop-Process -Id $Process.Id -Force
+  try {
+    Wait-Process -Id $Process.Id -Timeout 10 -ErrorAction Stop
+  } catch {
+    Write-SmokeLog "WARN: forced process cleanup did not report exit before timeout. $($_.Exception.Message)"
+  }
+}
+
 function Set-SmokeEnvironmentValue {
   param([string]$Name, [string]$Value)
   if (-not $script:PreviousEnvironment.ContainsKey($Name)) {
@@ -219,14 +245,28 @@ function Assert-UnconfiguredSettings {
   Assert-True ($settingsStatus.local_api_provider_enabled -eq $false) "Local API Provider is disabled in isolated smoke"
 }
 
+function Test-IsEmptySmokeObject {
+  param([object]$Value)
+  if ($null -eq $Value) {
+    return $true
+  }
+  if ($Value -is [System.Collections.IDictionary]) {
+    return $Value.Count -eq 0
+  }
+  if ($Value -is [System.Collections.ICollection] -and -not ($Value -is [string])) {
+    return $Value.Count -eq 0
+  }
+  $properties = @($Value | Get-Member -MemberType NoteProperty -ErrorAction SilentlyContinue)
+  return $properties.Count -eq 0
+}
+
 function Assert-BlockedEmptyPredictions {
   param([object]$predictionsPayload)
   $cards = $predictionsPayload.cards
-  $cardsText = if ($null -eq $cards) { "{}" } else { $cards | ConvertTo-Json -Depth 20 }
   $predictionsCount = if ($null -eq $predictionsPayload.predictions) { 0 } else { @($predictionsPayload.predictions).Count }
   Assert-True (($predictionsPayload.status -eq "blocked") -or ($predictionsCount -eq 0)) "predictions blocked or empty without provider keys"
   Assert-True ($predictionsCount -eq 0) "prediction list is empty without provider keys"
-  Assert-True (($cardsText -eq "{}") -or ($cardsText -eq "null")) "prediction cards are empty without provider keys"
+  Assert-True (Test-IsEmptySmokeObject $cards) "prediction cards are empty without provider keys"
   Assert-True ($predictionsPayload.sample_data_used -eq $false) "sample_data_used is false in installed smoke"
   Assert-True ($predictionsPayload.baseline_used -eq $false) "baseline_used is false in installed smoke"
   Assert-True ($predictionsPayload.customer_prediction_generated -eq $false) "customer_prediction_generated is false in installed smoke"
@@ -348,12 +388,7 @@ try {
   Assert-True ($shutdown.http_shutdown_scheduled -eq $true) "shutdown API scheduled HTTP server shutdown"
   Assert-True ($shutdown.accepting_new_tasks -eq $false) "shutdown API stopped new task acceptance"
   Assert-PortReleased -Port $port -TimeoutSeconds 20
-  $processExitDeadline = (Get-Date).AddSeconds(20)
-  while (-not $process.HasExited -and (Get-Date) -lt $processExitDeadline) {
-    Start-Sleep -Milliseconds 300
-    $process.Refresh()
-  }
-  Assert-True ($process.HasExited) "installed process exited after shutdown API"
+  Stop-SmokeProcessIfRunning -Process $process -TimeoutSeconds 20
   Assert-NoSNInsightOrphanProcess
 
   Write-SmokeLog "Installed smoke passed."
@@ -366,12 +401,7 @@ try {
       Assert-True ($shutdown.http_shutdown_scheduled -eq $true) "shutdown API scheduled HTTP server shutdown"
       Assert-True ($shutdown.accepting_new_tasks -eq $false) "shutdown API stopped new task acceptance"
       Assert-PortReleased -Port $port -TimeoutSeconds 20
-      try {
-        Wait-Process -Id $process.Id -Timeout 20 -ErrorAction Stop
-        Write-SmokeLog "PASS: installed process exited after shutdown API"
-      } catch {
-        Write-SmokeLog "WARN: installed process did not exit after shutdown API before timeout. $($_.Exception.Message)"
-      }
+      Stop-SmokeProcessIfRunning -Process $process -TimeoutSeconds 20
     } catch {
       Write-SmokeLog "WARN: graceful shutdown validation failed. $($_.Exception.Message)"
     }

@@ -2,6 +2,8 @@
 
 Current private research release target: `0.4.2-private-research-beta.2`
 
+Latest RC validation evidence: [RELEASE_CANDIDATE_VALIDATION.md](RELEASE_CANDIDATE_VALIDATION.md).
+
 This guide covers the Windows installer build, installed smoke validation, local provider key handling, and release governance. The terminal is a research system. It does not connect to live trading, does not promise returns, and does not generate customer predictions unless a model has passed promotion gate and been explicitly approved as active.
 
 ## Prerequisites

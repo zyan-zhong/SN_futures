@@ -48,6 +48,8 @@ def build_local_api_provider_hub(*, write: bool = True) -> dict[str, Any]:
     current_step = "configure_local_api_provider_credentials"
     if configured and smoke_status not in {"pass", "research_only"}:
         current_step = "run_provider_smoke"
+    if configured and smoke_status == "pass":
+        current_step = "safe_refresh_data_status"
 
     legacy_status = _as_mapping(credentials.get("legacy_managed_proxy_status"))
     warnings = list(credentials.get("warning_reasons") or [])
@@ -61,7 +63,7 @@ def build_local_api_provider_hub(*, write: bool = True) -> dict[str, Any]:
 
     yfinance = _as_mapping(_as_mapping(credentials.get("providers")).get("yfinance_research_only"))
     payload = {
-        "status": "ready_for_smoke" if configured else "blocked",
+        "status": "ready_for_refresh" if configured and smoke_status == "pass" else ("ready_for_smoke" if configured else "blocked"),
         "generated_at": _now(),
         "hub_version": HUB_VERSION,
         "provider_mode": "local_api_provider",
@@ -83,8 +85,15 @@ def build_local_api_provider_hub(*, write: bool = True) -> dict[str, Any]:
         "local_cache_policy": credentials.get("local_cache_policy") or {},
         "blocking_reasons": list(dict.fromkeys(blocking)),
         "warning_reasons": list(dict.fromkeys(warnings)),
-        "next_allowed_action": "configure_local_api_provider_credentials" if not configured else "run_provider_smoke",
+        "next_allowed_action": (
+            "configure_local_api_provider_credentials"
+            if not configured
+            else ("safe_refresh_data_status" if smoke_status == "pass" else "run_provider_smoke")
+        ),
+        "safe_refresh_available": bool(configured and smoke_status == "pass"),
         "feature_store_v12_allowed": False,
+        "feature_store_written": False,
+        "backtest_invoked": False,
         "training_invoked": False,
         "active_updated": False,
         "customer_prediction_generated": False,

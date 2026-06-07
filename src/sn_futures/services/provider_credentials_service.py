@@ -19,7 +19,7 @@ PROVIDER_ENV_KEYS: dict[str, tuple[str, ...]] = {
     "twelvedata": ("SN_TWELVEDATA_API_KEY",),
     "alphavantage": ("SN_ALPHA_VANTAGE_API_KEY", "SN_ALPHA_VANTAGE_KEY"),
     "fred": ("SN_FRED_API_KEY",),
-    "custom_http_provider": ("SN_CUSTOM_HTTP_PROVIDER_API_KEY",),
+    "custom_http_provider": ("SN_LOCAL_API_PROVIDER_TOKEN", "SN_CUSTOM_HTTP_PROVIDER_API_KEY"),
 }
 
 PROVIDER_METADATA: dict[str, dict[str, Any]] = {
@@ -69,6 +69,7 @@ LEGACY_MANAGED_PROXY_ENV_KEYS = (
     "SN_MANAGED_DATA_PROXY_URL",
     "SN_MANAGED_DATA_PROXY_TOKEN",
 )
+LOCAL_API_PROVIDER_BASE_URL_KEYS = ("SN_LOCAL_API_PROVIDER_BASE_URL",)
 
 
 def _now() -> str:
@@ -124,7 +125,12 @@ def detect_legacy_managed_proxy_status() -> dict[str, Any]:
 def _provider_payload(provider_id: str) -> dict[str, Any]:
     metadata = dict(PROVIDER_METADATA[provider_id])
     value, source = _env_value(PROVIDER_ENV_KEYS.get(provider_id, ()))
+    base_url, base_url_source = ("", "none")
+    if provider_id == "custom_http_provider":
+        base_url, base_url_source = _env_value(LOCAL_API_PROVIDER_BASE_URL_KEYS)
     key_configured = bool(value)
+    if provider_id == "custom_http_provider":
+        key_configured = bool(value and base_url)
     return _safe(
         {
             "provider_id": provider_id,
@@ -132,6 +138,8 @@ def _provider_payload(provider_id: str) -> dict[str, Any]:
             "key_configured": key_configured,
             "key_masked": mask_secret(value) if key_configured else "",
             "key_source": source if key_configured else "none",
+            "base_url_configured": bool(base_url) if provider_id == "custom_http_provider" else False,
+            "base_url_source": base_url_source if base_url else "none",
             "credential_handoff_required": not key_configured and not bool(metadata.get("research_only")),
         }
     )

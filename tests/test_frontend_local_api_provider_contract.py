@@ -46,3 +46,27 @@ def test_local_api_provider_frontend_contract() -> None:
         "save token",
     ]:
         assert forbidden not in combined
+
+
+def test_local_provider_setup_flow_is_user_completable_and_managed_proxy_is_advanced() -> None:
+    api = _read("api/terminal.ts")
+    settings = _read("pages/SettingsPage.tsx")
+    data_status = _read("pages/DataStatusPage.tsx")
+    setup_flow = _read("components/setup/LocalProviderSetupFlow.tsx")
+
+    assert "saveSettingsSecrets" in api
+    assert "getProviderCredentials" in api
+    assert "runProviderSmokeTest" in api
+    assert "getDataStatusPayload" in api
+    assert "LocalProviderSetupFlow" in settings
+    assert "LocalProviderSetupFlow" in data_status
+    assert "SN_LOCAL_API_PROVIDER_TOKEN" in setup_flow
+    assert "SN_LOCAL_API_PROVIDER_BASE_URL" in setup_flow
+    assert "Save local provider settings" in setup_flow
+    assert "Provider key diagnostics" in setup_flow
+    assert "Run provider smoke" in setup_flow
+    assert "Refresh data-status" in setup_flow
+    assert "Safe refresh" in setup_flow
+    assert "raw Authorization" in setup_flow
+    assert "Advanced managed proxy" in data_status
+    assert data_status.index("LocalProviderSetupFlow") < data_status.index("Advanced managed proxy")

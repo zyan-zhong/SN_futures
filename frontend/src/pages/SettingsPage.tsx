@@ -20,6 +20,7 @@ import { MetricCard } from "../components/common/MetricCard";
 import { StatusPill } from "../components/common/StatusPill";
 import { SectionCard } from "../components/layout/SectionCard";
 import { TrainingDatasetStatusPanel } from "../components/model/TrainingDatasetStatusPanel";
+import { LocalProviderSetupFlow } from "../components/setup/LocalProviderSetupFlow";
 import { useLocalSetting } from "../hooks/useLocalSetting";
 import { usePolling } from "../hooks/usePolling";
 import { useUIMode } from "../context/UIModeContext";
@@ -379,6 +380,8 @@ export function SettingsPage() {
           <MetricCard label="最后更新时间" value={formatDateTime(status?.last_update_time)} />
         </div>
       </SectionCard>
+
+      <LocalProviderSetupFlow />
 
       <SectionCard title="密钥配置" subtitle="密钥只保存在本机用户目录；保存后输入框会自动清空，页面只显示脱敏结果。">
         <div className="settings-grid secret-form">

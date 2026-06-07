@@ -262,6 +262,11 @@ export function BacktestPage() {
                 <small>{formatNullable(auditableBacktest?.run_id, "no run")}</small>
               </div>
               <div className="metric-card">
+                <span className="metric-label">error_code</span>
+                <strong>{formatNullable(auditableBacktest?.error_code, "none")}</strong>
+                <small>BacktestManifest input gate</small>
+              </div>
+              <div className="metric-card">
                 <span className="metric-label">read_only</span>
                 <strong>{auditableBacktest?.read_only === false ? "false" : "true"}</strong>
                 <small>backtest_invoked={String(auditableBacktest?.backtest_invoked ?? false)}</small>

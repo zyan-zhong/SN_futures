@@ -111,6 +111,101 @@ def test_auditable_backtest_readonly_api_blocks_without_inputs(monkeypatch, tmp_
     assert not (tmp_path / "user_data" / "outputs" / "backtests").exists()
 
 
+def test_auditable_backtest_readonly_api_blocks_without_immutable_bars(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("SN_DATA_DIR", str(tmp_path / "user_data"))
+    input_dir = tmp_path / "user_data" / "outputs" / "backtest_inputs" / "sn_main"
+    _write_auditable_inputs(input_dir)
+    (input_dir / "immutable_historical_bars.csv").unlink()
+
+    status, payload = handle_terminal_api("/api/terminal/backtest/auditable", "GET", {}, None)
+
+    assert status == 200
+    assert payload["status"] == "blocked"
+    assert payload["equity"] == []
+    assert payload["trades"] == []
+    assert "historical_bars_missing" in payload["blocking_reasons"]
+    assert payload["backtest_invoked"] is False
+    assert payload["customer_prediction_generated"] is False
+
+
+def test_auditable_backtest_readonly_api_blocks_without_signals(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("SN_DATA_DIR", str(tmp_path / "user_data"))
+    input_dir = tmp_path / "user_data" / "outputs" / "backtest_inputs" / "sn_main"
+    _write_auditable_inputs(input_dir)
+    (input_dir / "signals.csv").unlink()
+
+    status, payload = handle_terminal_api("/api/terminal/backtest/auditable", "GET", {}, None)
+
+    assert status == 200
+    assert payload["status"] == "blocked"
+    assert payload["equity"] == []
+    assert payload["trades"] == []
+    assert "signals_missing" in payload["blocking_reasons"]
+    assert payload["metrics"] == {}
+
+
+def test_auditable_backtest_readonly_api_blocks_without_required_manifest(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("SN_DATA_DIR", str(tmp_path / "user_data"))
+    input_dir = tmp_path / "user_data" / "outputs" / "backtest_inputs" / "sn_main"
+    _write_auditable_inputs(input_dir)
+    (input_dir / "historical_bars_manifest.json").unlink()
+
+    status, payload = handle_terminal_api("/api/terminal/backtest/auditable", "GET", {}, None)
+
+    assert status == 200
+    assert payload["status"] == "blocked"
+    assert payload["equity"] == []
+    assert payload["trades"] == []
+    assert "data_manifest_missing" in payload["blocking_reasons"]
+    assert payload["manifest"] == {}
+
+
+def test_auditable_backtest_readonly_api_blocks_sample_data(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("SN_DATA_DIR", str(tmp_path / "user_data"))
+    input_dir = tmp_path / "user_data" / "outputs" / "backtest_inputs" / "sn_main"
+    _write_auditable_inputs(input_dir)
+    _write_json(
+        input_dir / "historical_bars_manifest.json",
+        {
+            "schema_version": 1,
+            "provider": "contract_test_provider",
+            "data_kind": "daily_bar",
+            "sample_data_used": True,
+            "baseline_used": False,
+            "history_immutable": True,
+            "allowed_for_backtest": True,
+        },
+    )
+
+    status, payload = handle_terminal_api("/api/terminal/backtest/auditable", "GET", {}, None)
+
+    assert status == 200
+    assert payload["status"] == "blocked"
+    assert payload["sample_data_used"] is True
+    assert payload["equity"] == []
+    assert payload["trades"] == []
+    assert "sample_data_used" in payload["blocking_reasons"]
+
+
+def test_auditable_backtest_readonly_api_rejects_display_payload_input(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("SN_DATA_DIR", str(tmp_path / "user_data"))
+
+    status, payload = handle_terminal_api(
+        "/api/terminal/backtest/auditable",
+        "GET",
+        {"input_source": ["display_payload"]},
+        None,
+    )
+
+    assert status == 400
+    assert payload["status"] == "rejected"
+    assert payload["error_code"] == "display_payload_not_allowed"
+    assert payload["equity"] == []
+    assert payload["trades"] == []
+    assert payload["chart_payload_input_used"] is False
+    assert payload["display_payload_input_used"] is False
+
+
 def test_auditable_backtest_readonly_api_ignores_chart_payload(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv("SN_DATA_DIR", str(tmp_path / "user_data"))
     chart_dir = tmp_path / "user_data" / "outputs" / "research_backtests" / "v5"
@@ -149,6 +244,12 @@ def test_auditable_backtest_readonly_api_reads_manifest_metrics_equity_and_trade
     assert payload["manifest"]["run_id"] == "api-readable-run"
     assert payload["manifest"]["chart_payload_input_used"] is False
     assert payload["manifest"]["display_payload_input_used"] is False
+    assert payload["manifest"]["data_manifest_hash"]
+    assert payload["manifest"]["signal_manifest_hash"]
+    assert payload["manifest"]["point_in_time_feature_manifest_hash"]
+    assert payload["manifest"]["cost_model"]["commission_per_contract"] == 3.0
+    assert payload["manifest"]["slippage_model"]["slippage_ticks"] == 1.0
+    assert payload["manifest"]["margin_model"]["margin_rate"] == 0.14
     assert payload["metrics"]["trade_count"] > 0
     assert payload["equity"]
     assert payload["trades"]

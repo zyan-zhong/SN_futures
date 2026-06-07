@@ -33,6 +33,7 @@ def test_frontend_exposes_auditable_backtest_readonly_client() -> None:
     assert "/api/terminal/backtest/auditable" in api
     assert "AuditableBacktestPayload" in types
     assert "BacktestManifest" in types
+    assert "error_code?: string" in types
 
 
 def test_backtest_page_exposes_auditable_manifest_metrics_equity_and_trades() -> None:
@@ -43,5 +44,8 @@ def test_backtest_page_exposes_auditable_manifest_metrics_equity_and_trades() ->
     assert "auditableBacktest" in page
     assert "equity" in page
     assert "trades" in page
+    assert "blocking_reasons" in page
+    assert "error_code" in page
     assert "chart_payload_input_used" in page
     assert "display_payload_input_used" in page
+    assert "fake equity" not in page.lower()

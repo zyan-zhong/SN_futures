@@ -60,6 +60,7 @@ export interface BacktestManifest {
 
 export interface AuditableBacktestPayload {
   status?: string;
+  error_code?: string;
   run_id?: string;
   generated_at?: string;
   input_id?: string;

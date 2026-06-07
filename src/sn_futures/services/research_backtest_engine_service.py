@@ -159,6 +159,32 @@ def _readonly_flags() -> dict[str, Any]:
     }
 
 
+def reject_display_payload_backtest_input(*, input_source: str = "display_payload") -> dict[str, Any]:
+    source = str(input_source or "display_payload").strip() or "display_payload"
+    return sanitize_for_json(
+        {
+            "status": "rejected",
+            "error_code": "display_payload_not_allowed",
+            "run_id": "",
+            "generated_at": _now(),
+            "input_id": "",
+            "input_source": source,
+            "input_dir": "",
+            "manifest": {},
+            "manifest_path": "",
+            "metrics": {},
+            "equity": [],
+            "trades": [],
+            "blocking_reasons": ["display_payload_not_allowed"],
+            "sample_data_used": False,
+            "baseline_used": False,
+            "message_zh": "可审计研究回测只允许 BacktestManifest、immutable bars 和 signal manifest；不能从 UI chart/display payload 反向拼回测。",
+            "disclaimer": "Research reference only; not investment advice.",
+            **_readonly_flags(),
+        }
+    )
+
+
 def get_auditable_research_backtest_view(
     *,
     run_id: str | None = None,
@@ -178,6 +204,7 @@ def get_auditable_research_backtest_view(
         return sanitize_for_json(
             {
                 "status": "blocked",
+                "error_code": blocking_reasons[0] if blocking_reasons else "auditable_backtest_blocked",
                 "run_id": safe_run_id,
                 "generated_at": _now(),
                 "input_id": _safe_name(input_id, DEFAULT_INPUT_ID),
@@ -221,6 +248,7 @@ def get_auditable_research_backtest_view(
     return sanitize_for_json(
         {
             "status": status,
+            "error_code": result_reasons[0] if result_reasons else "",
             "run_id": resolved_run_id,
             "generated_at": str(manifest.get("generated_at") or _now()),
             "input_id": _safe_name(input_id, DEFAULT_INPUT_ID),

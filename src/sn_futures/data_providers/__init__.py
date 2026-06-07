@@ -7,6 +7,11 @@ rate-limited cache client.
 
 from .base import BaseProvider, ProviderResult, ProviderStatus
 from .akshare_news_provider import AkShareNewsProvider
+from .institutional_status_providers import (
+    PublicPolicyRssContractProvider,
+    ShfePublicContractProvider,
+    TushareFuturesContractProvider,
+)
 from .newsapi_unified_provider import NewsApiNewsProvider
 from .provider_registry import build_provider_registry, list_provider_registry
 from .sina_unified_provider import SinaRealtimeQuoteProvider
@@ -17,6 +22,9 @@ __all__ = [
     "ProviderResult",
     "ProviderStatus",
     "AkShareNewsProvider",
+    "PublicPolicyRssContractProvider",
+    "ShfePublicContractProvider",
+    "TushareFuturesContractProvider",
     "SinaRealtimeQuoteProvider",
     "NewsApiNewsProvider",
     "build_provider_registry",

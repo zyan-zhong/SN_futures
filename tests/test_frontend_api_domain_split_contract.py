@@ -92,6 +92,37 @@ def test_backtest_client_is_split_from_terminal_client() -> None:
         assert f"export function {function_name}" in backtest
 
 
+def test_settings_client_is_split_from_terminal_client_with_compat_reexport() -> None:
+    terminal = _read(FRONTEND_API_DIR / "terminal.ts")
+    settings = _read(FRONTEND_API_DIR / "settings.ts")
+
+    assert 'from "./settings"' in terminal
+    for function_name in (
+        "getSettingsStatus",
+        "getKeyDiagnostics",
+        "saveSettingsSecrets",
+        "resetSettingsSecrets",
+    ):
+        assert f"export function {function_name}" not in terminal
+        assert f"export function {function_name}" in settings
+
+
+def test_tasks_client_is_split_from_terminal_client_with_compat_reexport() -> None:
+    terminal = _read(FRONTEND_API_DIR / "terminal.ts")
+    tasks = _read(FRONTEND_API_DIR / "tasks.ts")
+
+    assert 'from "./tasks"' in terminal
+    for function_name in (
+        "startTerminalTask",
+        "getTerminalTaskStatus",
+        "getRecentTerminalTasks",
+        "getTaskNotifications",
+        "cancelTerminalTask",
+    ):
+        assert f"export function {function_name}" not in terminal
+        assert f"export function {function_name}" in tasks
+
+
 def test_backend_docs_and_frontend_domain_manifest_are_bidirectional() -> None:
     manifest = _read(FRONTEND_API_DIR / "terminalEndpointManifest.ts")
     domains, domain_paths = _manifest_domain_paths(manifest)
@@ -107,3 +138,22 @@ def test_backend_docs_and_frontend_domain_manifest_are_bidirectional() -> None:
     assert sorted(domain_paths - docs_paths) == []
     assert sorted(client_paths - docs_paths) == []
     assert sorted(docs_paths - client_paths - domain_paths - shared_paths - intentionally_unwrapped_paths) == []
+
+
+def test_settings_and_tasks_domains_cover_split_client_endpoints() -> None:
+    manifest = _read(FRONTEND_API_DIR / "terminalEndpointManifest.ts")
+    domains, _ = _manifest_domain_paths(manifest)
+
+    assert {
+        "/api/terminal/settings/status",
+        "/api/terminal/settings/key-diagnostics",
+        "/api/terminal/settings/secrets",
+        "/api/terminal/settings/reset",
+    }.issubset(domains["settings"])
+    assert {
+        "/api/terminal/tasks/start",
+        "/api/terminal/tasks/status",
+        "/api/terminal/tasks/recent",
+        "/api/terminal/tasks/cancel",
+        "/api/terminal/task-notifications",
+    }.issubset(domains["tasks"])

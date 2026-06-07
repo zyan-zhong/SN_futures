@@ -34,6 +34,7 @@ export const terminalEndpointDomains = {
   settings: [
     "/api/terminal/settings/status",
     "/api/terminal/settings/secrets",
+    "/api/terminal/settings/reset",
     "/api/terminal/settings/key-diagnostics",
     "/api/terminal/local-api-provider/hub"
   ],
@@ -41,7 +42,8 @@ export const terminalEndpointDomains = {
     "/api/terminal/tasks/start",
     "/api/terminal/tasks/status",
     "/api/terminal/tasks/recent",
-    "/api/terminal/tasks/cancel"
+    "/api/terminal/tasks/cancel",
+    "/api/terminal/task-notifications"
   ]
 } as const;
 

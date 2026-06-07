@@ -59,8 +59,6 @@ import type {
   SystemHealth,
   TerminalSnapshot,
   TerminalSummary,
-  TerminalSettingsStatus,
-  KeyDiagnosticsPayload,
   TrainingDatasetStatus,
   CandidateTrainingStatus,
   CandidateV6ReadinessPayload,
@@ -115,8 +113,6 @@ import type {
   PredictionWorkspaceStatusPayload,
   ResearchDecisionBoardPayload,
   ResearchArtifactsPayload,
-  TaskNotificationsPayload,
-  TerminalTaskList,
   TerminalTaskStatus
 } from "./types";
 
@@ -128,6 +124,21 @@ export {
   optimizeResearchStrategy,
   runResearchBacktest
 } from "./backtest";
+
+export {
+  getKeyDiagnostics,
+  getSettingsStatus,
+  resetSettingsSecrets,
+  saveSettingsSecrets
+} from "./settings";
+
+export {
+  cancelTerminalTask,
+  getRecentTerminalTasks,
+  getTaskNotifications,
+  getTerminalTaskStatus,
+  startTerminalTask
+} from "./tasks";
 
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
@@ -220,14 +231,6 @@ export function shutdownBackend(reason = "frontend") {
   return postJson<BackendShutdownPayload>("/api/terminal/system/shutdown", { reason }, { timeoutMs: 5000 });
 }
 
-export function getSettingsStatus() {
-  return getJson<TerminalSettingsStatus>("/api/terminal/settings/status");
-}
-
-export function getKeyDiagnostics() {
-  return getJson<KeyDiagnosticsPayload>("/api/terminal/settings/key-diagnostics");
-}
-
 export function getRuntimeDiagnostics() {
   return getJson<RuntimeDiagnostics>("/api/terminal/runtime-diagnostics");
 }
@@ -282,26 +285,6 @@ export function getLatestSystemRepairPlan() {
 
 export function runRefreshTask(kind: "all" | "market" | "news" | "cross-market" | "predictions" | "reports", force = false) {
   return postJson<TerminalTaskStatus>(`/api/terminal/refresh/${kind}`, { force }, { timeoutMs: 30000 });
-}
-
-export function startTerminalTask(kind: string, payload: Record<string, unknown> = {}) {
-  return postJson<TerminalTaskStatus>("/api/terminal/tasks/start", { ...payload, kind }, { timeoutMs: 30000 });
-}
-
-export function getTerminalTaskStatus(taskId: string) {
-  return getJson<TerminalTaskStatus>(`/api/terminal/tasks/status?id=${encodeURIComponent(taskId)}`, { timeoutMs: 5000, dedupe: false });
-}
-
-export function getRecentTerminalTasks(limit = 20) {
-  return getJson<TerminalTaskList>(`/api/terminal/tasks/recent?limit=${encodeURIComponent(String(limit))}`, { timeoutMs: 5000, dedupe: false });
-}
-
-export function getTaskNotifications(limit = 20) {
-  return getJson<TaskNotificationsPayload>(`/api/terminal/task-notifications?limit=${encodeURIComponent(String(limit))}`, { timeoutMs: 5000, dedupe: false });
-}
-
-export function cancelTerminalTask(taskId: string) {
-  return postJson<TerminalTaskStatus>(`/api/terminal/tasks/cancel?id=${encodeURIComponent(taskId)}`, {}, { timeoutMs: 5000 });
 }
 
 export function refreshAll(force = false) {
@@ -1045,22 +1028,4 @@ export function getInstitutionalValidationReport(candidateVersion = "v1") {
 
 export function getInstitutionalStressTests(candidateVersion = "v1") {
   return getJson<InstitutionalStressTests>(`/api/terminal/validation/stress-tests?candidate_version=${encodeURIComponent(candidateVersion)}`);
-}
-
-export function saveSettingsSecrets(input: {
-  SN_ALPHA_VANTAGE_KEY?: string;
-  SN_NEWSAPI_KEY?: string;
-  SN_TUSHARE_TOKEN?: string;
-  SN_LOCAL_API_PROVIDER_ENABLED?: string;
-  SN_LOCAL_API_PROVIDER_ID?: string;
-  SN_LOCAL_API_PROVIDER_BASE_URL?: string;
-  SN_LOCAL_API_PROVIDER_TOKEN?: string;
-  SN_MANAGED_DATA_PROXY_TOKEN?: string;
-  SN_MANAGED_DATA_PROXY_URL?: string;
-}) {
-  return postJson<TerminalSettingsStatus>("/api/terminal/settings/secrets", input);
-}
-
-export function resetSettingsSecrets() {
-  return postJson<TerminalSettingsStatus>("/api/terminal/settings/reset", {});
 }

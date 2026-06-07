@@ -5,13 +5,16 @@ from pathlib import Path
 
 def test_frontend_has_task_queue_api_helpers() -> None:
     terminal = Path("frontend/src/api/terminal.ts").read_text(encoding="utf-8")
+    tasks = Path("frontend/src/api/tasks.ts").read_text(encoding="utf-8")
 
     assert "startTerminalTask" in terminal
     assert "getTerminalTaskStatus" in terminal
     assert "getRecentTerminalTasks" in terminal
     assert "cancelTerminalTask" in terminal
-    assert "/api/terminal/tasks/start" in terminal
-    assert "/api/terminal/tasks/status" in terminal
+    assert 'from "./tasks"' in terminal
+    assert "/api/terminal/tasks/start" in tasks
+    assert "/api/terminal/tasks/status" in tasks
+    assert "/api/terminal/task-notifications" in tasks
 
 
 def test_task_monitor_panel_polls_status_and_can_cancel() -> None:

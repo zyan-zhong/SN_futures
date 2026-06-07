@@ -6,6 +6,12 @@ from typing import Any, Iterable
 
 LABEL_VERSION = "label_v1_multi_horizon_pit"
 INTRADAY_HORIZONS = frozenset({"next_5m", "next_15m", "next_30m", "next_hour"})
+INTRADAY_INTERVAL_BY_HORIZON = {
+    "next_5m": "5m",
+    "next_15m": "15m",
+    "next_30m": "30m",
+    "next_hour": "1h",
+}
 
 
 @dataclass(frozen=True)
@@ -69,3 +75,44 @@ def normalise_label_specs(values: Iterable[int | str]) -> list[LabelSpec]:
         specs.append(spec)
         seen.add(spec.horizon)
     return specs
+
+
+def build_intraday_label_gate(values: Iterable[int | str], *, symbol: str = "SN") -> dict[str, Any]:
+    from ..services.intraday_bar_store_service import get_intraday_bar_store_status
+
+    horizons: dict[str, dict[str, Any]] = {}
+    for spec in normalise_label_specs(values):
+        if spec.horizon not in INTRADAY_HORIZONS:
+            horizons[spec.horizon] = {
+                "horizon": spec.horizon,
+                "requires_intraday_bars": False,
+                "required_interval": "",
+                "allowed": True,
+                "blocking_reasons": [],
+                "latest_quote_allowed_for_label": False,
+                "daily_bar_used_as_intraday": False,
+                "store_manifest": {},
+            }
+            continue
+        interval = INTRADAY_INTERVAL_BY_HORIZON[spec.horizon]
+        status = get_intraday_bar_store_status(symbol=symbol, interval=interval)
+        blocking_reasons = [str(item) for item in status.get("blocking_reasons", []) if str(item)]
+        allowed = bool(status.get("allowed_for_intraday_label")) and not blocking_reasons
+        if not allowed and "latest_quote_is_display_tick_not_label_source" not in blocking_reasons:
+            blocking_reasons.append("latest_quote_is_display_tick_not_label_source")
+        horizons[spec.horizon] = {
+            "horizon": spec.horizon,
+            "requires_intraday_bars": True,
+            "required_interval": interval,
+            "allowed": allowed,
+            "blocking_reasons": sorted(set(blocking_reasons)),
+            "latest_quote_allowed_for_label": False,
+            "daily_bar_used_as_intraday": bool(status.get("daily_bar_used_as_intraday")),
+            "store_manifest": status,
+        }
+    return {
+        "schema_version": "intraday_label_gate_v1",
+        "symbol": symbol,
+        "horizons": horizons,
+        "latest_quote_policy": "latest_quote_is_display_tick_not_label_source",
+    }

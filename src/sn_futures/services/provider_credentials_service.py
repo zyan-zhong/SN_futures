@@ -19,6 +19,7 @@ PROVIDER_ENV_KEYS: dict[str, tuple[str, ...]] = {
     "twelvedata": ("SN_TWELVEDATA_API_KEY",),
     "alphavantage": ("SN_ALPHA_VANTAGE_API_KEY", "SN_ALPHA_VANTAGE_KEY"),
     "fred": ("SN_FRED_API_KEY",),
+    "local_api_provider": ("SN_LOCAL_API_PROVIDER_TOKEN", "SN_CUSTOM_HTTP_PROVIDER_API_KEY"),
     "custom_http_provider": ("SN_LOCAL_API_PROVIDER_TOKEN", "SN_CUSTOM_HTTP_PROVIDER_API_KEY"),
 }
 
@@ -50,6 +51,13 @@ PROVIDER_METADATA: dict[str, dict[str, Any]] = {
         "production_eligible": False,
         "realtime_guarantee": False,
         "can_unlock_v12": False,
+    },
+    "local_api_provider": {
+        "display_name": "Local API Provider",
+        "research_only": False,
+        "production_eligible": True,
+        "realtime_guarantee": False,
+        "can_unlock_v12": True,
     },
     "custom_http_provider": {
         "display_name": "Custom HTTP Provider",
@@ -126,10 +134,10 @@ def _provider_payload(provider_id: str) -> dict[str, Any]:
     metadata = dict(PROVIDER_METADATA[provider_id])
     value, source = _env_value(PROVIDER_ENV_KEYS.get(provider_id, ()))
     base_url, base_url_source = ("", "none")
-    if provider_id == "custom_http_provider":
+    if provider_id in {"local_api_provider", "custom_http_provider"}:
         base_url, base_url_source = _env_value(LOCAL_API_PROVIDER_BASE_URL_KEYS)
     key_configured = bool(value)
-    if provider_id == "custom_http_provider":
+    if provider_id in {"local_api_provider", "custom_http_provider"}:
         key_configured = bool(value and base_url)
     return _safe(
         {
@@ -138,7 +146,7 @@ def _provider_payload(provider_id: str) -> dict[str, Any]:
             "key_configured": key_configured,
             "key_masked": mask_secret(value) if key_configured else "",
             "key_source": source if key_configured else "none",
-            "base_url_configured": bool(base_url) if provider_id == "custom_http_provider" else False,
+            "base_url_configured": bool(base_url) if provider_id in {"local_api_provider", "custom_http_provider"} else False,
             "base_url_source": base_url_source if base_url else "none",
             "credential_handoff_required": not key_configured and not bool(metadata.get("research_only")),
         }

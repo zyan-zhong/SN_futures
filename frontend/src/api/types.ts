@@ -950,10 +950,17 @@ export interface ProviderDetailsPayload {
 export interface ProviderSmokeSourceStatusPayload {
   source_id?: string;
   provider_id?: string;
+  function_name?: string;
+  path?: string;
+  schema?: string;
+  source_url_sanitized?: string;
   success?: boolean;
   row_count?: number;
+  status_code?: string;
   error_code?: string;
   error_message_sanitized?: string;
+  timed_out?: boolean;
+  rate_limited?: boolean;
 }
 
 export interface ProviderSmokeManifestPayload {
@@ -963,6 +970,11 @@ export interface ProviderSmokeManifestPayload {
   data_kind?: string;
   generated_at?: string;
   row_count?: number;
+  normalized_row_count?: number;
+  status_code?: string;
+  error_code?: string;
+  source_url_sanitized?: string;
+  sanitized_error?: string;
   source_statuses?: ProviderSmokeSourceStatusPayload[];
   blocking_reasons?: string[];
   status?: string;
@@ -974,6 +986,7 @@ export interface ProviderSmokeManifestPayload {
   backtest_invoked?: boolean;
   active_updated?: boolean;
   customer_prediction_generated?: boolean;
+  adapter_manifest?: Record<string, unknown>;
 }
 
 export interface ProviderCredentialsPayload {
@@ -1001,6 +1014,7 @@ export interface ProviderCredentialsPayload {
 
 export interface ProviderSmokePayload {
   status?: string;
+  error_code?: string;
   generated_at?: string;
   smoke_version?: string;
   provider?: string;

@@ -23,7 +23,7 @@ function maskedProviderToken(status: TerminalSettingsStatus | null) {
 }
 
 export function LocalProviderSetupFlow({ compact = false }: { compact?: boolean }) {
-  const [providerId, setProviderId] = useState("custom_http_provider");
+  const [providerId, setProviderId] = useState("local_api_provider");
   const [baseUrl, setBaseUrl] = useState("");
   const [token, setToken] = useState("");
   const [settings, setSettings] = useState<TerminalSettingsStatus | null>(null);
@@ -59,7 +59,7 @@ export function LocalProviderSetupFlow({ compact = false }: { compact?: boolean 
     try {
       const result = await saveSettingsSecrets({
         SN_LOCAL_API_PROVIDER_ENABLED: token.trim() || baseUrl.trim() ? "true" : "",
-        SN_LOCAL_API_PROVIDER_ID: providerId.trim() || "custom_http_provider",
+        SN_LOCAL_API_PROVIDER_ID: providerId.trim() || "local_api_provider",
         SN_LOCAL_API_PROVIDER_BASE_URL: baseUrl.trim(),
         SN_LOCAL_API_PROVIDER_TOKEN: token.trim()
       });
@@ -94,7 +94,7 @@ export function LocalProviderSetupFlow({ compact = false }: { compact?: boolean 
     setBusyAction("smoke");
     setMessage("");
     try {
-      const result = await runProviderSmokeTest({ provider_id: providerId || "custom_http_provider" });
+      const result = await runProviderSmokeTest({ provider_id: providerId || "local_api_provider" });
       setSmoke(result);
       const nextHub = await getLocalApiProviderHub();
       setHub(nextHub);
@@ -121,8 +121,10 @@ export function LocalProviderSetupFlow({ compact = false }: { compact?: boolean 
     }
   }
 
-  const localProvider = credentials?.providers?.custom_http_provider;
+  const localProvider = credentials?.providers?.local_api_provider || credentials?.providers?.custom_http_provider;
   const smokeStatus = smoke?.status || hub?.provider_smoke_status || "not_run";
+  const smokeSourceStatuses = smoke?.source_statuses || hub?.provider_smoke?.source_statuses || [];
+  const firstSmokeSource = smokeSourceStatuses[0];
   const smokeReady = hub?.safe_refresh_available || smokeStatus === "pass";
   const blockedReasons = smoke?.blocking_reasons || hub?.blocking_reasons || credentials?.blocking_reasons || [];
 
@@ -192,7 +194,7 @@ export function LocalProviderSetupFlow({ compact = false }: { compact?: boolean 
         <div className="metric-card">
           <span className="metric-label">credential handoff</span>
           <strong>{statusText(credentials?.provider_credentials_status, "missing_config")}</strong>
-          <small>{localProvider?.key_masked || "custom_http_provider not configured"}</small>
+          <small>{localProvider?.key_masked || "local_api_provider not configured"}</small>
         </div>
         <div className="metric-card">
           <span className="metric-label">provider smoke</span>
@@ -209,8 +211,10 @@ export function LocalProviderSetupFlow({ compact = false }: { compact?: boolean 
         <div className="notice-card">
           <strong>Smoke manifest</strong>
           <span>
-            source_statuses={(smoke?.source_statuses || hub?.provider_smoke?.source_statuses || []).length};
+            source_statuses={smokeSourceStatuses.length};
             row_count={smoke?.manifest?.row_count ?? hub?.provider_smoke?.manifest?.row_count ?? 0};
+            error_code={smoke?.error_code || smoke?.manifest?.error_code || firstSmokeSource?.error_code || "none"};
+            source path={firstSmokeSource?.path || "not available"};
             data-status={dataStatusMessage}
           </span>
         </div>

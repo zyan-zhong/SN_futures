@@ -60,6 +60,7 @@ def test_local_provider_setup_flow_is_user_completable_and_managed_proxy_is_adva
     assert "getDataStatusPayload" in api
     assert "LocalProviderSetupFlow" in settings
     assert "LocalProviderSetupFlow" in data_status
+    assert 'useState("local_api_provider")' in setup_flow
     assert "SN_LOCAL_API_PROVIDER_TOKEN" in setup_flow
     assert "SN_LOCAL_API_PROVIDER_BASE_URL" in setup_flow
     assert "Save local provider settings" in setup_flow
@@ -67,6 +68,8 @@ def test_local_provider_setup_flow_is_user_completable_and_managed_proxy_is_adva
     assert "Run provider smoke" in setup_flow
     assert "Refresh data-status" in setup_flow
     assert "Safe refresh" in setup_flow
+    assert "error_code" in setup_flow
+    assert "source path" in setup_flow
     assert "raw Authorization" in setup_flow
     assert "Advanced managed proxy" in data_status
     assert data_status.index("LocalProviderSetupFlow") < data_status.index("Advanced managed proxy")

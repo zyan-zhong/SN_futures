@@ -118,8 +118,8 @@ export function deriveSafeConfigSteps() {
 
 export function deriveBlockedPredictionExplanation(nextAllowedAction = "configure_local_api_provider_credentials") {
   return {
-    title: "Prediction is blocked",
-    summary: "This workspace is blocked. The system will not generate customer predictions and will not write an active model.",
+    title: "暂无真实预测",
+    summary: "数据源未配置或真实数据水位未通过，预测已阻断。The system will not generate customer predictions and will not write an active model. 研究参考，不构成投资建议。",
     reasons: [
       "No active model exists.",
       "No customer prediction exists.",

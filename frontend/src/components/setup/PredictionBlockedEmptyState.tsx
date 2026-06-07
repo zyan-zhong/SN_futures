@@ -7,6 +7,7 @@ export function PredictionBlockedEmptyState({ nextAllowedAction }: { nextAllowed
     <section aria-label="Prediction blocked empty state" className="guided-empty-state prediction-blocked-empty-state">
       <header>
         <strong>{state.title}</strong>
+        <small>Prediction is blocked</small>
         <span>{state.summary}</span>
       </header>
       <div className="guided-empty-state__grid">

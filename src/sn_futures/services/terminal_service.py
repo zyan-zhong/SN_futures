@@ -2279,3 +2279,123 @@ def build_terminal_data_status() -> dict[str, Any]:  # type: ignore[override]
     result["provenance_gate"] = prediction_gate
     result["provenance_schema_version"] = provenance.get("schema_version")
     return sanitize_for_json(result)
+
+
+def _local_first_setup_payload() -> dict[str, Any]:
+    try:
+        from .settings_service import get_terminal_settings_status
+
+        settings = get_terminal_settings_status()
+    except Exception:
+        settings = {}
+    settings_map = settings if isinstance(settings, Mapping) else {}
+    summary = {
+        "alpha_vantage_configured": bool(settings_map.get("alpha_vantage_configured")),
+        "newsapi_configured": bool(settings_map.get("newsapi_configured")),
+        "tushare_configured": bool(settings_map.get("tushare_configured")),
+        "local_api_provider_configured": bool(settings_map.get("local_api_provider_configured")),
+    }
+    matrix = [
+        {
+            "provider_id": "alpha_vantage",
+            "label": "Alpha Vantage",
+            "configured": summary["alpha_vantage_configured"],
+            "status": "configured" if summary["alpha_vantage_configured"] else "not_configured",
+            "next_action": "Set SN_ALPHA_VANTAGE_KEY locally, then refresh provider status.",
+        },
+        {
+            "provider_id": "newsapi",
+            "label": "NewsAPI",
+            "configured": summary["newsapi_configured"],
+            "status": "configured" if summary["newsapi_configured"] else "not_configured",
+            "next_action": "Set SN_NEWSAPI_KEY locally, then run a news provider smoke test.",
+        },
+        {
+            "provider_id": "tushare",
+            "label": "Tushare",
+            "configured": summary["tushare_configured"],
+            "status": "configured" if summary["tushare_configured"] else "not_configured",
+            "next_action": "Set SN_TUSHARE_TOKEN locally for futures fundamentals.",
+        },
+        {
+            "provider_id": "local_api_provider",
+            "label": "Local API Provider",
+            "configured": summary["local_api_provider_configured"],
+            "status": "configured" if summary["local_api_provider_configured"] else "not_configured",
+            "next_action": "Configure SN_LOCAL_API_PROVIDER_* locally, then run provider smoke.",
+        },
+    ]
+    if all(summary.values()):
+        next_actions = ["Run provider smoke", "Refresh market data", "Review data watermark"]
+    else:
+        next_actions = ["Configure local provider keys", "Run provider smoke after configuration", "Refresh market data only after provider status is clear"]
+    try:
+        from .local_api_provider_hub_service import build_local_api_provider_hub
+
+        local_provider_flow = build_local_api_provider_hub(write=False)
+    except Exception as exc:
+        local_provider_flow = {
+            "status": "blocked",
+            "provider_mode": "local_api_provider",
+            "provider_smoke_status": "not_run",
+            "next_allowed_action": "configure_local_api_provider_credentials",
+            "safe_refresh_available": False,
+            "blocking_reasons": [f"local_api_provider_hub_unavailable:{type(exc).__name__}"],
+            "feature_store_written": False,
+            "training_invoked": False,
+            "backtest_invoked": False,
+            "active_updated": False,
+            "customer_prediction_generated": False,
+        }
+    return sanitize_for_json(
+        {
+            "local_setup_summary": summary,
+            "provider_setup_matrix": matrix,
+            "local_api_provider_flow": local_provider_flow,
+            "local_first_next_actions": next_actions,
+            "prediction_blocked_summary": {
+                "status": "blocked",
+                "message_zh": "暂无真实预测。数据源未配置或真实数据水位未通过，预测已阻断。",
+                "customer_prediction_generated": False,
+            },
+            "sample_price_history_used_as_real": False,
+        }
+    )
+
+
+_LOCAL_FIRST_PREVIOUS_BUILD_TERMINAL_DATA_STATUS = build_terminal_data_status
+
+
+def build_terminal_data_status() -> dict[str, Any]:  # type: ignore[override]
+    payload = _LOCAL_FIRST_PREVIOUS_BUILD_TERMINAL_DATA_STATUS()
+    result = dict(payload) if isinstance(payload, Mapping) else {}
+    result.update(_local_first_setup_payload())
+    return sanitize_for_json(result)
+
+
+_LOCAL_FIRST_PREVIOUS_BUILD_TERMINAL_SUMMARY = build_terminal_summary
+
+
+def build_terminal_summary() -> dict[str, Any]:  # type: ignore[override]
+    summary = _LOCAL_FIRST_PREVIOUS_BUILD_TERMINAL_SUMMARY()
+    result = dict(summary) if isinstance(summary, Mapping) else {}
+    result["sample_price_history_used_as_real"] = False
+    return sanitize_for_json(result)
+
+
+_LOCAL_FIRST_PREVIOUS_BUILD_TERMINAL_SNAPSHOT = build_terminal_snapshot
+
+
+def build_terminal_snapshot() -> dict[str, Any]:  # type: ignore[override]
+    snapshot = _LOCAL_FIRST_PREVIOUS_BUILD_TERMINAL_SNAPSHOT()
+    result = dict(snapshot) if isinstance(snapshot, Mapping) else {}
+    local_first = _local_first_setup_payload()
+    result["local_setup_summary"] = local_first["local_setup_summary"]
+    result["provider_setup_matrix"] = local_first["provider_setup_matrix"]
+    result["local_first_next_actions"] = local_first["local_first_next_actions"]
+    result["prediction_blocked_summary"] = local_first["prediction_blocked_summary"]
+    result["sample_price_history_used_as_real"] = False
+    summary = result.get("summary")
+    if isinstance(summary, Mapping):
+        result["summary"] = sanitize_for_json({**dict(summary), "sample_price_history_used_as_real": False})
+    return sanitize_for_json(result)

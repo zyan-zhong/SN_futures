@@ -103,14 +103,14 @@ export function PredictionWorkspacePage() {
         />
         <div className="notice-card">
           <strong>{formatWorkspaceFieldLabel("next_allowed_action")}</strong>
-          <span>{formatNextAction(workspace?.next_allowed_action ?? "configure_managed_proxy_endpoint_or_token")}</span>
+          <span>{formatNextAction(workspace?.next_allowed_action ?? "configure_local_api_provider_credentials")}</span>
         </div>
         <details aria-label="Prediction next action raw status details" className="technical-details-drawer">
           <summary>Raw status</summary>
           <dl>
             <div>
               <dt>{formatRawStatusLabel("next_allowed_action")}</dt>
-              <dd>{workspace?.next_allowed_action ?? "configure_managed_proxy_endpoint_or_token"}</dd>
+              <dd>{workspace?.next_allowed_action ?? "configure_local_api_provider_credentials"}</dd>
             </div>
           </dl>
         </details>

@@ -12,6 +12,8 @@ import { SectionCard } from "../components/layout/SectionCard";
 import { LearningStatusPanel } from "../components/model/LearningStatusPanel";
 import { ModelHealthPanel } from "../components/model/ModelHealthPanel";
 import { PredictionGrid } from "../components/prediction/PredictionGrid";
+import { LocalFirstStatusPanel } from "../components/setup/LocalFirstStatusPanel";
+import { PredictionBlockedEmptyState } from "../components/setup/PredictionBlockedEmptyState";
 import { usePolling } from "../hooks/usePolling";
 import { useUIMode } from "../context/UIModeContext";
 import { formatDateTime, formatNullable, formatPercent, formatPrice, formatSignal } from "../utils/format";
@@ -38,7 +40,7 @@ function dataSourceSummary(snapshot?: TerminalSnapshot | null): string {
 export function DashboardPage({
   snapshot,
   onRefresh,
-  showSampleData = true
+  showSampleData = false
 }: {
   snapshot?: TerminalSnapshot | null;
   onRefresh?: () => void;
@@ -69,6 +71,7 @@ export function DashboardPage({
   return (
     <div className="page-stack">
       <SystemStatusBanner snapshot={snapshot} />
+      <LocalFirstStatusPanel snapshot={snapshot} />
       <SectionCard title="总览" subtitle="关键状态，一屏看完。">
         <div className="metric-grid dashboard-core-grid simple-dashboard-grid">
           <div className="metric-card core-status-card">
@@ -125,7 +128,10 @@ export function DashboardPage({
             {predictions.length ? (
               <PredictionGrid predictions={predictions.slice(0, 7)} />
             ) : (
-              <EmptyState label="暂无 active 预测" description="候选模型未通过 gate，不生成客户预测。" />
+              <>
+                <PredictionBlockedEmptyState />
+                <EmptyState label="暂无真实预测" description="数据源未配置或真实数据水位未通过，预测已阻断；不会展示样例预测卡。" />
+              </>
             )}
           </SectionCard>
         </ErrorBoundary>

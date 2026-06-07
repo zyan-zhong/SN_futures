@@ -5,6 +5,8 @@ import { DataTable } from "../components/common/DataTable";
 import { WorkspaceGuardBanner } from "../components/common/WorkspaceGuardBanner";
 import { SectionCard } from "../components/layout/SectionCard";
 import { GuidedSetupChecklist } from "../components/setup/GuidedSetupChecklist";
+import { LocalFirstStatusPanel } from "../components/setup/LocalFirstStatusPanel";
+import { PredictionBlockedEmptyState } from "../components/setup/PredictionBlockedEmptyState";
 import { SafeConfigInstructions } from "../components/setup/SafeConfigInstructions";
 import { formatBooleanFlag, formatWorkspaceFieldLabel } from "../utils/copySystem";
 import { formatNextAction, formatStatusLabel } from "../utils/statusTaxonomy";
@@ -29,6 +31,8 @@ export function TerminalOverviewPage() {
   return (
     <div className="page-stack">
       <WorkspaceGuardBanner workspace="Terminal Overview" source={{ ...(board ?? {}), ...(workspace ?? {}) }} />
+      <LocalFirstStatusPanel title="System Readiness" />
+      <PredictionBlockedEmptyState nextAllowedAction={workspace?.next_allowed_action} />
       <GuidedSetupChecklist />
       <SectionCard title="Current State" subtitle="Terminal Overview keeps the first screen focused on the current blocker and next safe action.">
         <div className="metric-grid">
@@ -80,27 +84,30 @@ export function TerminalOverviewPage() {
           </div>
           <div className="metric-card">
             <span>current setup step</span>
-            <strong>{setupChecklist?.current_step || "configure_managed_proxy_endpoint_token"}</strong>
+            <strong>{setupChecklist?.current_step || "configure_local_api_provider_credentials"}</strong>
           </div>
         </div>
       </SectionCard>
 
-      <SectionCard title="Managed Proxy / v12 chain" subtitle="The main blocker remains managed data readiness before v12 can be built.">
-        <div className="metric-grid">
-          <div className="metric-card">
-            <span>managed proxy</span>
-            <strong>{formatStatusLabel(board?.managed_proxy_summary?.status ?? "blocked")}</strong>
+      <details aria-label="Advanced Diagnostics / Research Governance" className="technical-details-drawer">
+        <summary>Advanced Diagnostics / Research Governance</summary>
+        <SectionCard title="Managed Proxy / v12 chain" subtitle="Legacy and advanced governance diagnostics are secondary to local provider readiness.">
+          <div className="metric-grid">
+            <div className="metric-card">
+              <span>managed proxy</span>
+              <strong>{formatStatusLabel(board?.managed_proxy_summary?.status ?? "blocked")}</strong>
+            </div>
+            <div className="metric-card">
+              <span>Feature Store v12</span>
+              <strong>{formatStatusLabel(board?.feature_store_v12_summary?.status ?? "blocked")}</strong>
+            </div>
+            <div className="metric-card">
+              <span>Training Dataset v12</span>
+              <strong>{formatStatusLabel(board?.training_dataset_v12_summary?.status ?? "blocked")}</strong>
+            </div>
           </div>
-          <div className="metric-card">
-            <span>Feature Store v12</span>
-            <strong>{formatStatusLabel(board?.feature_store_v12_summary?.status ?? "blocked")}</strong>
-          </div>
-          <div className="metric-card">
-            <span>Training Dataset v12</span>
-            <strong>{formatStatusLabel(board?.training_dataset_v12_summary?.status ?? "blocked")}</strong>
-          </div>
-        </div>
-      </SectionCard>
+        </SectionCard>
+      </details>
 
       <SectionCard title="No-active / no-prediction confirmation" subtitle="This overview is read-only and does not start backend tasks.">
         <div className="notice-card">

@@ -4,6 +4,192 @@ Validation date: 2026-06-06
 
 This report records the local Release Candidate build and installed-smoke evidence for SNInsightTerminal. It is a validation record only. The installer artifact remains a local ignored build artifact and must be uploaded as a GitHub Release asset, not committed to the source repository.
 
+## RC Validation Pass 2
+
+Validation date: 2026-06-07
+
+This second validation pass was run during the local-first second-stage milestone. It validated the current local worktree after the second-stage provider, backtest, intraday, and frontend API contract work. The source repository was not pushed and no PR was created. The validation did not trigger real provider refreshes, model training, customer prediction generation, research backtest generation, or Feature Store builds.
+
+### Source State
+
+- Branch: `main`
+- HEAD SHA: `bf55517`
+- Latest merge: `Merge pull request #10 from zyan-zhong/docs/release-candidate-validation`
+- Worktree state: local milestone changes present and intentionally uncommitted
+- Repository cleanliness check: passed
+- Tracked forbidden runtime/build/cache artifacts: none
+
+### Full Quality Gate
+
+Command:
+
+```powershell
+$env:SN_ALPHA_VANTAGE_KEY=$null
+$env:SN_NEWSAPI_KEY=$null
+$env:SN_TUSHARE_TOKEN=$null
+$env:SN_LOCAL_API_PROVIDER_TOKEN=$null
+$env:SN_LOCAL_API_PROVIDER_ENABLED="0"
+$env:SN_MANAGED_PROXY_TOKEN=$null
+$env:SN_MANAGED_DATA_PROXY_TOKEN=$null
+$env:SN_DISABLE_AUTO_SCHEDULER="1"
+python scripts\quality_gate.py --continue-on-error
+```
+
+Result: passed.
+
+- Repo cleanliness: passed
+- Secret scan: passed
+- Release package safety scan: passed
+- Real-result sample/baseline scan: passed
+- Historical OHLCV scaling scan: passed
+- Python compileall: passed
+- API endpoint contract tests: `13 passed`
+- Data watermark schema tests: `12 passed`
+- Full pytest: `1683 passed`
+- Frontend typecheck: passed
+- Frontend build: passed
+- Frontend UI contract check: passed
+- Frontend E2E: `36 passed`
+- Total quality gate duration: `540.6s`
+
+### Build Command
+
+Before the build, only repository-local `build/`, `dist/`, and `release/` directories were removed. No user data directory was removed.
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File packaging\build_release.ps1
+```
+
+Result: passed.
+
+- `build_release.ps1` exit code: `0`
+- Full pytest inside release build: `1683 passed`
+- Frontend typecheck/build/check:ui: passed
+- PyInstaller onedir build: passed
+- Built-in onedir smoke in `build_release.ps1`: passed
+- Inno Setup compile: passed
+- Inno Setup compiler engine: `6.7.3`
+
+### Artifact Summary
+
+- Onedir executable: `dist/SNInsightTerminal/SNInsightTerminal.exe`
+- Installer executable: `release/SNInsightTerminal_Setup.exe`
+- Installer size: `42,725,907` bytes
+- Installer SHA256: `256E11B2F133881586A622985FE8A242FAFEA61F0D34ECF53B1970A07480AAA5`
+- `release/SHA256SUMS.txt`: matches installer SHA256
+
+### Onedir Smoke
+
+Command shape:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File packaging\smoke_installed.ps1 `
+  -SkipInstall `
+  -KeepInstalled `
+  -SetupPath release\SNInsightTerminal_Setup.exe `
+  -InstalledRoot dist\SNInsightTerminal `
+  -UseTempDataDir `
+  -ApiPort 18865 `
+  -TimeoutSeconds 120
+```
+
+Result: passed.
+
+- `/api/terminal/docs`: `200`
+- `/api/terminal/data-status`: `200`
+- `/api/terminal/settings/status`: Alpha Vantage, NewsAPI, Tushare, and Local API Provider unconfigured
+- `/api/terminal/predictions`: blocked or empty
+- Prediction list: empty
+- Prediction cards: empty
+- `sample_data_used=false`
+- `baseline_used=false`
+- `customer_prediction_generated=false`
+- `/terminal`: `200`
+- `/legacy`: `200`
+- Shutdown endpoint: passed
+- Port released: passed
+- No `SNInsightTerminal` orphan process remained
+
+Note: the frozen onedir process released the port but did not exit within the smoke timeout. The smoke script forced cleanup as designed and then verified no orphan process remained.
+
+### Installer Smoke
+
+Command shape:
+
+```powershell
+$installRoot = Join-Path $env:TEMP ("SNInsightTerminalInstall_" + [guid]::NewGuid().ToString("N"))
+powershell -NoProfile -ExecutionPolicy Bypass -File packaging\smoke_installed.ps1 `
+  -SetupPath release\SNInsightTerminal_Setup.exe `
+  -InstalledRoot $installRoot `
+  -UseTempDataDir `
+  -ApiPort 18866 `
+  -TimeoutSeconds 120
+```
+
+Result: passed.
+
+- Silent install: passed
+- Installed executable exists: passed
+- Start menu shortcut exists: passed
+- `/api/terminal/docs`: `200`
+- `/api/terminal/data-status`: `200`
+- `/api/terminal/settings/status`: Alpha Vantage, NewsAPI, Tushare, and Local API Provider unconfigured
+- `/api/terminal/predictions`: blocked or empty
+- Prediction list: empty
+- Prediction cards: empty
+- `sample_data_used=false`
+- `baseline_used=false`
+- `customer_prediction_generated=false`
+- `/terminal`: `200`
+- `/legacy`: `200`
+- Shutdown endpoint: passed
+- Port released: passed
+- No `SNInsightTerminal` orphan process remained
+- Silent uninstall: passed
+- Temporary install directory removed
+- Temporary smoke data directory removed
+
+Note: as in the onedir smoke, the frozen installed process released the port but required forced cleanup after the shutdown timeout. The smoke contract passed because cleanup completed and no orphan process remained.
+
+### Forbidden Artifact Scan
+
+Commands:
+
+```powershell
+python scripts\quality_gate.py --only-scans --continue-on-error
+python scripts\check_repo_cleanliness.py
+```
+
+Result: passed.
+
+Manual `dist/` and `release/` scan also passed. No forbidden packaged files were found:
+
+- `.env`
+- `secrets.json`
+- `private_bundle_seed.json`
+- `private_release_keys.json`
+- `app_data/`
+- `outputs/`
+- `cache/`
+- `logs/`
+- `*.sqlite`
+- `*.sqlite3`
+- `*.db`
+- `*.log`
+
+### Final Local Checks
+
+- `git diff --check`: passed, with Git line-ending warnings only
+- `git status --short`: showed expected local milestone source changes only
+- `build/`, `dist/`, and `release/`: local ignored artifacts, not tracked
+
+### Pass 2 Known Limitations
+
+- The installer is still unsigned unless a later code-signing step is added.
+- No real provider-key configured smoke was run.
+- The build used the local worktree with uncommitted second-stage milestone changes; it is a local validation artifact, not a tagged source release.
+- The installer artifact remains a local ignored artifact and must be uploaded as a GitHub Release asset if promoted.
+
 ## RC Build Summary
 
 - Repository: `SN_futures`

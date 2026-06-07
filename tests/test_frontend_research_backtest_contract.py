@@ -6,10 +6,20 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def _api_client_surface() -> str:
+    api_dir = ROOT / "frontend" / "src" / "api"
+    return "\n".join(
+        (api_dir / name).read_text(encoding="utf-8")
+        for name in ("terminal.ts", "backtest.ts")
+    )
+
+
 def test_frontend_exposes_research_backtest_api_contract() -> None:
-    api = (ROOT / "frontend" / "src" / "api" / "terminal.ts").read_text(encoding="utf-8")
+    api = _api_client_surface()
     assert "runCandidateV3Research" in api
     assert "runResearchBacktest" in api
+    assert "getAuditableResearchBacktest" in api
+    assert "/api/terminal/backtest/auditable" in api
     assert "getResearchBacktestReport" in api
     assert "getResearchEquityCurve" in api
     assert "getResearchArtifacts" in api
@@ -30,4 +40,3 @@ def test_research_lab_shows_candidate_v3_artifacts_and_comparison() -> None:
     assert "artifacts 下载" in page
     assert "v1/v2/v3 对比" in page
     assert "不发布 active" in page
-

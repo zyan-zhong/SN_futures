@@ -60,6 +60,18 @@ def _read_json(path: Path) -> Any:
     return None
 
 
+def _read_csv_records(path: Path, *, limit: int = 1000) -> list[dict[str, Any]]:
+    if not path.exists() or not path.is_file():
+        return []
+    try:
+        frame = pd.read_csv(path)
+    except Exception:
+        return []
+    if frame.empty:
+        return []
+    return sanitize_for_json(frame.head(max(1, int(limit))).to_dict(orient="records"))
+
+
 def _write_json(path: Path, payload: Mapping[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(sanitize_for_json(dict(payload)), ensure_ascii=False, indent=2), encoding="utf-8")
@@ -79,6 +91,153 @@ def _manifest_flag(payload: Any, key: str) -> bool:
     if isinstance(payload, Mapping):
         return bool(payload.get(key))
     return False
+
+
+def _input_blocking_reasons(input_path: Path) -> tuple[list[str], Any, Any, Any]:
+    bars_path = input_path / "immutable_historical_bars.csv"
+    data_manifest_path = input_path / "historical_bars_manifest.json"
+    signals_path = input_path / "signals.csv"
+    signal_manifest_path = input_path / "signal_manifest.json"
+    contract_metadata_path = input_path / "contract_metadata.json"
+    feature_manifest_path = input_path / "point_in_time_feature_manifest.json"
+    data_manifest = _read_json(data_manifest_path)
+    signal_manifest = _read_json(signal_manifest_path)
+    feature_manifest = _read_json(feature_manifest_path)
+
+    blocked_reasons: list[str] = []
+    if not bars_path.exists():
+        blocked_reasons.append("historical_bars_missing")
+    if data_manifest is None:
+        blocked_reasons.append("data_manifest_missing")
+    if not signals_path.exists():
+        blocked_reasons.append("signals_missing")
+    if signal_manifest is None:
+        blocked_reasons.append("signal_manifest_missing")
+    if not contract_metadata_path.exists():
+        blocked_reasons.append("contract_metadata_missing")
+    if feature_manifest is None:
+        blocked_reasons.append("point_in_time_feature_manifest_missing")
+    if data_manifest is not None and not _manifest_flag(data_manifest, "history_immutable"):
+        blocked_reasons.append("historical_bars_not_marked_immutable")
+    if data_manifest is not None and data_manifest.get("allowed_for_backtest") is False:
+        blocked_reasons.append("historical_bars_not_allowed_for_backtest")
+    if _manifest_flag(data_manifest, "sample_data_used") or _manifest_flag(signal_manifest, "sample_data_used") or _manifest_flag(feature_manifest, "sample_data_used"):
+        blocked_reasons.append("sample_data_used")
+    if _manifest_flag(data_manifest, "baseline_used") or _manifest_flag(signal_manifest, "baseline_used") or _manifest_flag(feature_manifest, "baseline_used"):
+        blocked_reasons.append("baseline_used")
+    if signal_manifest is not None and not _manifest_flag(signal_manifest, "lookahead_check_pass"):
+        blocked_reasons.append("lookahead_check_failed")
+    if feature_manifest is not None and not _manifest_flag(feature_manifest, "leakage_check_pass"):
+        blocked_reasons.append("point_in_time_leakage_check_failed")
+    if _manifest_flag(feature_manifest, "display_overlay_used"):
+        blocked_reasons.append("display_overlay_used_in_feature_manifest")
+    if _manifest_flag(feature_manifest, "live_quote_used_for_training"):
+        blocked_reasons.append("live_quote_used_for_training")
+    return blocked_reasons, data_manifest, signal_manifest, feature_manifest
+
+
+def _latest_backtest_run_dir() -> Path | None:
+    root = _output_dir() / "backtests"
+    if not root.exists():
+        return None
+    candidates = [path for path in root.iterdir() if path.is_dir() and (path / "backtest_manifest.json").exists()]
+    if not candidates:
+        return None
+    return max(candidates, key=lambda path: (path / "backtest_manifest.json").stat().st_mtime)
+
+
+def _readonly_flags() -> dict[str, Any]:
+    return {
+        "read_only": True,
+        "chart_payload_input_used": False,
+        "display_payload_input_used": False,
+        "feature_store_written": False,
+        "training_invoked": False,
+        "backtest_invoked": False,
+        "active_updated": False,
+        "customer_prediction_generated": False,
+    }
+
+
+def get_auditable_research_backtest_view(
+    *,
+    run_id: str | None = None,
+    input_id: str = DEFAULT_INPUT_ID,
+    max_rows: int = 1000,
+) -> dict[str, Any]:
+    """Read an auditable backtest result without running or reconstructing it."""
+
+    safe_run_id = _safe_name(run_id, "") if run_id else ""
+    input_path = _input_dir(input_id)
+    input_reasons, data_manifest, signal_manifest, feature_manifest = _input_blocking_reasons(input_path)
+    run_path = _run_dir(safe_run_id) if safe_run_id else _latest_backtest_run_dir()
+    manifest_path = run_path / "backtest_manifest.json" if run_path is not None else None
+    manifest = _read_json(manifest_path) if manifest_path is not None else None
+    if not isinstance(manifest, Mapping):
+        blocking_reasons = ["auditable_backtest_result_missing", *input_reasons]
+        return sanitize_for_json(
+            {
+                "status": "blocked",
+                "run_id": safe_run_id,
+                "generated_at": _now(),
+                "input_id": _safe_name(input_id, DEFAULT_INPUT_ID),
+                "input_dir": str(input_path),
+                "manifest": {},
+                "manifest_path": str(manifest_path or ""),
+                "metrics": {},
+                "equity": [],
+                "trades": [],
+                "blocking_reasons": blocking_reasons,
+                "sample_data_used": _manifest_flag(data_manifest, "sample_data_used")
+                or _manifest_flag(signal_manifest, "sample_data_used")
+                or _manifest_flag(feature_manifest, "sample_data_used"),
+                "baseline_used": _manifest_flag(data_manifest, "baseline_used")
+                or _manifest_flag(signal_manifest, "baseline_used")
+                or _manifest_flag(feature_manifest, "baseline_used"),
+                "message_zh": "可审计研究回测尚无可读取结果；需要真实历史 bars、signals 和 manifest 后再由显式回测流程生成。",
+                "disclaimer": "Research reference only; not investment advice.",
+                **_readonly_flags(),
+            }
+        )
+
+    manifest_blocking = [str(item) for item in manifest.get("blocked_reasons", []) if str(item)]
+    metrics_path = Path(str(manifest.get("metrics_path") or "")) if manifest.get("metrics_path") else Path()
+    equity_path = Path(str(manifest.get("equity_curve_path") or "")) if manifest.get("equity_curve_path") else Path()
+    trades_path = Path(str(manifest.get("trades_path") or "")) if manifest.get("trades_path") else Path()
+    metrics = _read_json(metrics_path) if metrics_path else None
+    equity = _read_csv_records(equity_path, limit=max_rows) if equity_path else []
+    trades = _read_csv_records(trades_path, limit=max_rows) if trades_path else []
+
+    result_reasons = list(manifest_blocking)
+    if not manifest_blocking:
+        if not isinstance(metrics, Mapping):
+            result_reasons.append("metrics_missing")
+        if not equity:
+            result_reasons.append("equity_curve_missing")
+        if not trades:
+            result_reasons.append("trades_missing")
+    status = "blocked" if result_reasons else "success"
+    resolved_run_id = str(manifest.get("run_id") or safe_run_id or (run_path.name if run_path is not None else ""))
+    return sanitize_for_json(
+        {
+            "status": status,
+            "run_id": resolved_run_id,
+            "generated_at": str(manifest.get("generated_at") or _now()),
+            "input_id": _safe_name(input_id, DEFAULT_INPUT_ID),
+            "input_dir": str(input_path),
+            "manifest": dict(manifest),
+            "manifest_path": str(manifest_path or ""),
+            "metrics": dict(metrics) if isinstance(metrics, Mapping) else {},
+            "equity": equity if status == "success" else [],
+            "trades": trades if status == "success" else [],
+            "blocking_reasons": result_reasons,
+            "sample_data_used": bool(manifest.get("sample_data_used")),
+            "baseline_used": bool(manifest.get("baseline_used")),
+            "message_zh": "可审计研究回测结果来自 immutable historical bars、signal manifest 和 BacktestManifest；研究参考，不构成投资建议。",
+            "disclaimer": str(manifest.get("disclaimer") or "Research reference only; not investment advice."),
+            **_readonly_flags(),
+        }
+    )
 
 
 def _cost_config(config: ResearchBacktestRunConfig) -> CostConfig:

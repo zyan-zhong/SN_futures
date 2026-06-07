@@ -1,6 +1,5 @@
 import { getJson, postJson } from "./client";
 import type {
-  BacktestDiagnostics,
   DataSourceStatus,
   DataConsistencyReport,
   DiagnosticsExportPayload,
@@ -116,13 +115,19 @@ import type {
   PredictionWorkspaceStatusPayload,
   ResearchDecisionBoardPayload,
   ResearchArtifactsPayload,
-  ResearchBacktestPayload,
-  ResearchEquityCurvePayload,
-  StrategyOptimizationPayload,
   TaskNotificationsPayload,
   TerminalTaskList,
   TerminalTaskStatus
 } from "./types";
+
+export {
+  getAuditableResearchBacktest,
+  getBacktestDiagnostics,
+  getResearchBacktestReport,
+  getResearchEquityCurve,
+  optimizeResearchStrategy,
+  runResearchBacktest
+} from "./backtest";
 
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
@@ -175,10 +180,6 @@ export function pauseLearningScheduler(reason = "") {
 
 export function resumeLearningScheduler() {
   return postJson<LearningSchedulerStatus>("/api/terminal/learning-scheduler/resume", {});
-}
-
-export function getBacktestDiagnostics(horizon = "tomorrow") {
-  return getJson<BacktestDiagnostics>(`/api/terminal/backtest-diagnostics?horizon=${encodeURIComponent(horizon)}`);
 }
 
 export function postPositionScenario(input: PositionScenarioInput) {
@@ -1026,32 +1027,12 @@ export function getCpcvValidationReport(candidateVersion = "v9") {
   return getJson<CPCVValidationPayload>(`/api/terminal/research/cpcv-report?candidate_version=${encodeURIComponent(candidateVersion)}`, { timeoutMs: 30000, dedupe: false });
 }
 
-export function runResearchBacktest(input: { candidate_version?: string; version?: string; horizons?: string[] } = {}) {
-  return postJson<TerminalTaskStatus>("/api/terminal/research/run-backtest", input, { timeoutMs: 30000 });
-}
-
-export function getResearchBacktestReport(runId?: string, candidateVersion = "v3") {
-  const params = new URLSearchParams({ candidate_version: candidateVersion });
-  if (runId) params.set("run_id", runId);
-  return getJson<ResearchBacktestPayload>(`/api/terminal/research/backtest-report?${params.toString()}`);
-}
-
-export function getResearchEquityCurve(horizon = "1d", runId?: string, candidateVersion = "v3") {
-  const params = new URLSearchParams({ horizon, candidate_version: candidateVersion });
-  if (runId) params.set("run_id", runId);
-  return getJson<ResearchEquityCurvePayload>(`/api/terminal/research/equity-curve?${params.toString()}`);
-}
-
 export function getResearchArtifacts(runId?: string, candidateVersion?: string) {
   const params = new URLSearchParams();
   if (runId) params.set("run_id", runId);
   if (candidateVersion) params.set("candidate_version", candidateVersion);
   const suffix = params.toString() ? `?${params.toString()}` : "";
   return getJson<ResearchArtifactsPayload>(`/api/terminal/research/artifacts${suffix}`);
-}
-
-export function optimizeResearchStrategy(input: { candidate_version?: string; version?: string; horizons?: string[] } = {}) {
-  return postJson<TerminalTaskStatus>("/api/terminal/research/optimize-strategy", input, { timeoutMs: 30000 });
 }
 
 export function runInstitutionalValidation(input: { candidate_version?: string; dry_run?: boolean } = {}) {

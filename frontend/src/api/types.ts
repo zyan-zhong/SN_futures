@@ -1,3 +1,14 @@
+import type { BacktestDiagnostics, ResearchBacktestPayload } from "./types/backtest";
+
+export type {
+  AuditableBacktestPayload,
+  BacktestDiagnostics,
+  BacktestManifest,
+  ResearchBacktestHorizon,
+  ResearchBacktestPayload,
+  ResearchEquityCurvePayload
+} from "./types/backtest";
+
 export type NullableNumber = number | null | undefined;
 
 export interface TerminalSummary {
@@ -103,18 +114,6 @@ export interface LearningSchedulerStatus {
   active_updated?: boolean;
   customer_prediction_generated?: boolean;
   message_zh?: string;
-}
-
-export interface BacktestDiagnostics {
-  horizon?: string;
-  walk_forward_metrics?: Record<string, unknown>;
-  baseline_comparison?: Record<string, unknown>;
-  cost_sensitivity?: Record<string, unknown>;
-  by_regime?: Record<string, unknown>;
-  by_signal_strength?: Record<string, unknown>;
-  drawdown_periods?: Array<Record<string, unknown>>;
-  promotion_gate_result?: string;
-  failure_reasons?: string[];
 }
 
 export interface PositionScenarioInput {
@@ -242,6 +241,16 @@ export interface TerminalSnapshot {
   sample_mode?: boolean;
   sample_banner_zh?: string;
   message_zh?: string;
+  local_setup_summary?: {
+    alpha_vantage_configured?: boolean;
+    newsapi_configured?: boolean;
+    tushare_configured?: boolean;
+    local_api_provider_configured?: boolean;
+  };
+  provider_setup_matrix?: Array<Record<string, unknown>>;
+  local_first_next_actions?: string[];
+  prediction_blocked_summary?: Record<string, unknown>;
+  sample_price_history_used_as_real?: boolean;
   summary?: TerminalSummary;
   predictions?: PredictionCard[];
   model_health?: ModelHealth;
@@ -929,11 +938,42 @@ export interface ProviderDetailsPayload {
   key_configured?: boolean;
   key_masked?: string;
   key_source?: string;
+  base_url_configured?: boolean;
+  base_url_source?: string;
   research_only?: boolean;
   production_eligible?: boolean;
   realtime_guarantee?: boolean;
   can_unlock_v12?: boolean;
   credential_handoff_required?: boolean;
+}
+
+export interface ProviderSmokeSourceStatusPayload {
+  source_id?: string;
+  provider_id?: string;
+  success?: boolean;
+  row_count?: number;
+  error_code?: string;
+  error_message_sanitized?: string;
+}
+
+export interface ProviderSmokeManifestPayload {
+  schema_version?: string;
+  provider_id?: string;
+  provider_mode?: string;
+  data_kind?: string;
+  generated_at?: string;
+  row_count?: number;
+  source_statuses?: ProviderSmokeSourceStatusPayload[];
+  blocking_reasons?: string[];
+  status?: string;
+  sample_data_used?: boolean;
+  baseline_used?: boolean;
+  feature_store_written?: boolean;
+  production_cache_written?: boolean;
+  training_invoked?: boolean;
+  backtest_invoked?: boolean;
+  active_updated?: boolean;
+  customer_prediction_generated?: boolean;
 }
 
 export interface ProviderCredentialsPayload {
@@ -984,9 +1024,12 @@ export interface ProviderSmokePayload {
   feature_store_written?: boolean;
   production_cache_written?: boolean;
   training_invoked?: boolean;
+  backtest_invoked?: boolean;
   active_updated?: boolean;
   customer_prediction_generated?: boolean;
   blocking_reasons?: string[];
+  source_statuses?: ProviderSmokeSourceStatusPayload[];
+  manifest?: ProviderSmokeManifestPayload;
   report_path?: string;
 }
 
@@ -1009,7 +1052,10 @@ export interface LocalApiProviderHubPayload {
   blocking_reasons?: string[];
   warning_reasons?: string[];
   next_allowed_action?: string;
+  safe_refresh_available?: boolean;
   feature_store_v12_allowed?: boolean;
+  feature_store_written?: boolean;
+  backtest_invoked?: boolean;
   training_invoked?: boolean;
   active_updated?: boolean;
   customer_prediction_generated?: boolean;
@@ -2218,36 +2264,6 @@ export interface InstitutionalStressTests {
   regime_stress?: Record<string, Record<string, unknown>>;
   message_zh?: string;
   generated_at?: string;
-}
-
-export interface ResearchBacktestHorizon {
-  horizon?: string;
-  status?: string;
-  equity_curve_path?: string;
-  drawdown_curve_path?: string;
-  trades_path?: string;
-  metrics_path?: string;
-  metrics?: Record<string, unknown>;
-}
-
-export interface ResearchBacktestPayload {
-  status?: string;
-  candidate_version?: string;
-  generated_at?: string;
-  horizons?: Record<string, ResearchBacktestHorizon>;
-  report_path?: string;
-  markdown?: string;
-  message_zh?: string;
-  active_updated?: boolean;
-  customer_prediction_generated?: boolean;
-}
-
-export interface ResearchEquityCurvePayload {
-  status?: string;
-  horizon?: string;
-  path?: string;
-  points?: Array<Record<string, unknown>>;
-  message_zh?: string;
 }
 
 export interface ResearchArtifactsPayload {

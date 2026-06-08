@@ -1,3 +1,52 @@
+export const terminalEndpointDomains = {
+  market: [
+    "/api/terminal/summary",
+    "/api/terminal/snapshot",
+    "/api/terminal/data-status",
+    "/api/terminal/market-analysis"
+  ],
+  events: [
+    "/api/terminal/events/news",
+    "/api/terminal/events/relevance-diagnostics",
+    "/api/terminal/events/source-quality-report",
+    "/api/terminal/events/evidence"
+  ],
+  features: [
+    "/api/terminal/feature-store/build",
+    "/api/terminal/feature-store/v12",
+    "/api/terminal/feature-store/v12-input-contract",
+    "/api/terminal/training-dataset/status"
+  ],
+  models: [
+    "/api/terminal/model-health",
+    "/api/terminal/models/active-status",
+    "/api/terminal/models/candidate-status",
+    "/api/terminal/models/promotion-report"
+  ],
+  backtest: [
+    "/api/terminal/backtest-diagnostics",
+    "/api/terminal/backtest/auditable",
+    "/api/terminal/research/run-backtest",
+    "/api/terminal/research/backtest-report",
+    "/api/terminal/research/equity-curve",
+    "/api/terminal/research/optimize-strategy"
+  ],
+  settings: [
+    "/api/terminal/settings/status",
+    "/api/terminal/settings/secrets",
+    "/api/terminal/settings/reset",
+    "/api/terminal/settings/key-diagnostics",
+    "/api/terminal/local-api-provider/hub"
+  ],
+  tasks: [
+    "/api/terminal/tasks/start",
+    "/api/terminal/tasks/status",
+    "/api/terminal/tasks/recent",
+    "/api/terminal/tasks/cancel",
+    "/api/terminal/task-notifications"
+  ]
+} as const;
+
 export const terminalEndpointsCoveredBySharedClient = [
   "/api/terminal/refresh/all",
   "/api/terminal/refresh/cross-market",

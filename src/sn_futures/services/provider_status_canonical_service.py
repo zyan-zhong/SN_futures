@@ -267,6 +267,49 @@ def _simple_provider(
     )
 
 
+def _provider_result_bridge_status(
+    canonical_provider_id: str,
+    bridge_provider_id: str,
+    *,
+    output_dir: Path,
+    default_enabled: bool = True,
+    default_configured: bool = True,
+) -> dict[str, Any] | None:
+    path = output_dir / "provider_results" / bridge_provider_id / "latest_status.json"
+    payload = _read_json(path)
+    if not isinstance(payload, Mapping):
+        return None
+    top: Mapping[str, Any] = payload
+    manifest = payload.get("manifest") if isinstance(payload.get("manifest"), Mapping) else {}
+    provider: Mapping[str, Any] = {
+        "success": bool(payload.get("success")),
+        "status": "success" if payload.get("success") else str(payload.get("error_code") or "blocked"),
+        "row_count": _safe_int(payload.get("normalized_row_count") or payload.get("row_count")),
+        "from_cache": bool(payload.get("from_cache")),
+        "stale": bool(payload.get("stale")),
+        "last_attempt_time": _first_str(payload.get("fetched_at"), manifest.get("fetched_at")),
+        "last_success_time": _first_str(payload.get("as_of"), payload.get("source_timestamp")) if payload.get("success") else "",
+        "message_zh": _first_str(payload.get("sanitized_error"), manifest.get("sanitized_error"), payload.get("error_code")),
+        "error_code": str(payload.get("error_code") or ""),
+        "configured": default_configured,
+        "enabled": default_enabled,
+    }
+    row = _canonical_row(
+        canonical_provider_id,
+        source_file=path,
+        top=top,
+        provider=provider,
+        data_generated_at=_first_str(payload.get("as_of"), payload.get("source_timestamp"), manifest.get("as_of")),
+        default_enabled=default_enabled,
+        default_configured=default_configured,
+    )
+    row["provider_status_source"] = "provider_result_bridge"
+    row["provider_interface_schema_version"] = str(payload.get("schema_version") or manifest.get("provider_interface_schema_version") or "")
+    row["bridge_provider_id"] = bridge_provider_id
+    row["manifest_hash"] = str(manifest.get("content_hash") or "")
+    return row
+
+
 def _market_status(output_dir: Path) -> dict[str, Any]:
     path = output_dir / "market_provider_status.json"
     payload = _read_json(path)
@@ -331,16 +374,26 @@ def build_canonical_provider_status() -> dict[str, Any]:
     output_dir = _output_dir()
     fundamentals = output_dir / "fundamentals"
     shfe_public = _simple_provider("shfe_public", fundamentals / "shfe_public_provider_status.json", default_configured=True)
+    shfe_bridge = _provider_result_bridge_status("shfe_public", "shfe_public", output_dir=output_dir)
+    if shfe_bridge is not None:
+        shfe_public = shfe_bridge
     market_shfe_public = _market_child_status(output_dir, "shfe_public", "shfe_public")
     if market_shfe_public is not None and not shfe_public.get("source_file"):
         shfe_public = market_shfe_public
+    tushare = _provider_result_bridge_status("tushare", "tushare_futures", output_dir=output_dir, default_configured=bool(os.environ.get("SN_TUSHARE_TOKEN")) or True)
+    if tushare is None:
+        tushare = _simple_provider("tushare", fundamentals / "tushare_provider_status.json", default_configured=bool(os.environ.get("SN_TUSHARE_TOKEN")))
+    policy_rss = _provider_result_bridge_status("public_policy_rss", "public_policy_rss", output_dir=output_dir, default_configured=True)
+    if policy_rss is None:
+        policy_rss = _simple_provider("public_policy_rss", output_dir / "events" / "public_policy_rss_provider_status.json", default_configured=False)
     providers = {
         "market": _market_status(output_dir),
         "alpha_vantage": _alpha_status(output_dir),
         "newsapi": _newsapi_status(output_dir),
-        "tushare": _simple_provider("tushare", fundamentals / "tushare_provider_status.json", default_configured=bool(os.environ.get("SN_TUSHARE_TOKEN"))),
+        "tushare": tushare,
         "managed_proxy": _simple_provider("managed_proxy", fundamentals / "managed_proxy_status.json", default_enabled=False, default_configured=bool(os.environ.get("SN_MANAGED_DATA_PROXY_TOKEN"))),
         "shfe_public": shfe_public,
+        "public_policy_rss": policy_rss,
         "lme_tin": _simple_provider("lme_tin", fundamentals / "lme_tin_provider_status.json", default_configured=False),
     }
     akshare_history = _market_child_status(output_dir, "akshare_history", "akshare_history")

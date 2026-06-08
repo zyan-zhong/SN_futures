@@ -7,6 +7,7 @@ from .leakage_guard import (
     check_train_test_label_window_overlap,
     infer_label_columns,
 )
+from .horizons import build_intraday_label_gate
 
 __all__ = [
     "add_forward_return_labels",
@@ -17,4 +18,5 @@ __all__ = [
     "check_label_timestamps",
     "check_train_test_label_window_overlap",
     "infer_label_columns",
+    "build_intraday_label_gate",
 ]

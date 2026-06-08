@@ -32,9 +32,15 @@ def _terminal_docs_payload() -> dict:
 
 
 def _frontend_terminal_paths() -> tuple[set[str], set[str]]:
-    terminal = Path("frontend/src/api/terminal.ts").read_text(encoding="utf-8")
-    literal_paths = set(TERMINAL_PATH_RE.findall(terminal))
-    template_prefixes = set(TERMINAL_TEMPLATE_PREFIX_RE.findall(terminal))
+    api_dir = Path("frontend/src/api")
+    client_files = [
+        path
+        for path in api_dir.glob("*.ts")
+        if path.name not in {"client.ts", "terminalEndpointManifest.ts"}
+    ]
+    source = "\n".join(path.read_text(encoding="utf-8") for path in client_files)
+    literal_paths = set(TERMINAL_PATH_RE.findall(source))
+    template_prefixes = set(TERMINAL_TEMPLATE_PREFIX_RE.findall(source))
     return literal_paths, template_prefixes
 
 

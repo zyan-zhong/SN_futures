@@ -318,6 +318,7 @@ TERMINAL_API_DOCS = {
         {"method": "GET", "path": "/api/terminal/model-health", "description": "返回模型健康、晋级和降级状态。"},
         {"method": "GET", "path": "/api/terminal/learning-status", "description": "返回学习、回测、候选训练和任务状态。"},
         {"method": "GET", "path": "/api/terminal/backtest-diagnostics", "description": "返回指定周期的回测诊断。"},
+        {"method": "GET", "path": "/api/terminal/backtest/auditable", "description": "只读读取可审计研究回测 BacktestManifest、metrics、equity 和 trades；不从 UI chart payload 拼回测。"},
         {"method": "POST", "path": "/api/terminal/position-scenario", "description": "返回合规持仓情景观察区。"},
         {"method": "GET", "path": "/api/terminal/reports", "description": "返回日报、周报、月报和事件报告摘要。"},
         {"method": "GET", "path": "/api/terminal/data-status", "description": "返回数据源、缓存和数据水位状态。"},

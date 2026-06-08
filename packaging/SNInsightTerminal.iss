@@ -21,6 +21,13 @@ UninstallDisplayIcon={app}\{#MyAppExeName}
 [Files]
 Source: "..\dist\SNInsightTerminal\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
+[InstallDelete]
+Type: files; Name: "{app}\_internal\private\private_bundle_seed.json"
+Type: files; Name: "{app}\_internal\private\private_release_keys.json"
+Type: files; Name: "{app}\_internal\private\secrets.json"
+Type: files; Name: "{app}\_internal\private\.env"
+Type: dirifempty; Name: "{app}\_internal\private"
+
 [Icons]
 Name: "{group}\SNInsightTerminal"; Filename: "{app}\{#MyAppExeName}"
 Name: "{userdesktop}\SNInsightTerminal"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon

@@ -128,7 +128,12 @@ const STATUS_ALIASES: Record<string, string> = {
 };
 
 const NEXT_ACTION_LABELS: Record<string, string> = {
-  "configure_managed_proxy_endpoint_or_token": "配置 Managed Proxy endpoint 或 token",
+  // Legacy managed-proxy copy retained for contract compatibility only:
+  // 配置 Managed Proxy endpoint 或 token
+  // 閰嶇疆 Managed Proxy endpoint 鎴?token
+  "configure_local_api_provider_credentials": "配置 Local API Provider credentials",
+  "configure_managed_proxy_endpoint_or_token": "配置 Local API Provider credentials",
+  "configure_managed_proxy_endpoint_token": "配置 Local API Provider credentials",
   "review_governance_console": "查看 Governance Console",
   "review_missing_evidence": "核对缺失 evidence",
   "wait_for_upstream_readiness": "等待上游 readiness",

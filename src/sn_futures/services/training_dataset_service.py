@@ -12,7 +12,7 @@ import pandas as pd
 from ..api.json_utils import sanitize_for_json
 from ..features_core.pipeline import build_feature_matrix
 from ..labels.forward_return import add_forward_return_labels, forward_label_columns
-from ..labels.horizons import INTRADAY_HORIZONS, LABEL_VERSION, LabelSpec, label_spec_to_dict, normalise_label_specs
+from ..labels.horizons import INTRADAY_HORIZONS, LABEL_VERSION, LabelSpec, build_intraday_label_gate, label_spec_to_dict, normalise_label_specs
 from ..labels.leakage_guard import LABEL_PREFIXES, check_feature_label_leakage, infer_label_columns
 from ..labels.triple_barrier import add_triple_barrier_labels
 from ..runtime import get_user_output_dir
@@ -294,6 +294,7 @@ def _build_training_dataset_from_feature_store(
         raise ValueError("Feature Store v3 没有满足覆盖率和泄漏检查的真实特征列，未构建训练数据。")
 
     label_specs = normalise_label_specs(horizons)
+    intraday_label_gate = build_intraday_label_gate([spec.horizon for spec in label_specs])
     label_cols = ["target_return", "direction_label", "volatility_adjusted_label", "label_available_at"]
     removed_label_cols = sorted(set(infer_label_columns(list(frame.columns) + label_cols)))
     leakage = check_feature_label_leakage(feature_cols, label_cols)
@@ -332,6 +333,11 @@ def _build_training_dataset_from_feature_store(
         class_distribution[suffix] = label_distribution_by_horizon[suffix]
         return_summary_by_horizon[suffix] = _return_summary(dataset["y_return"])
         horizon_blocked: list[str] = []
+        intraday_gate_row = {}
+        if spec.horizon in INTRADAY_HORIZONS:
+            intraday_gate_row = dict(intraday_label_gate.get("horizons", {}).get(spec.horizon, {}))
+            if not intraday_gate_row.get("allowed"):
+                horizon_blocked.extend([str(reason) for reason in intraday_gate_row.get("blocking_reasons", []) if str(reason)])
         if spec.horizon in INTRADAY_HORIZONS and (median_step_seconds is None or median_step_seconds > 3600):
             horizon_blocked.append("intraday_horizon_requires_intraday_bars")
         if sample_count < MIN_SAMPLES_PER_HORIZON:
@@ -357,6 +363,7 @@ def _build_training_dataset_from_feature_store(
             "class_distribution": class_distribution[suffix],
             "leakage_check_pass": leakage_check_pass and not horizon_blocked,
             "blocked_reasons": horizon_blocked,
+            "intraday_label_gate": intraday_gate_row,
         }
         blocked_reasons.extend([f"{suffix}:{reason}" for reason in horizon_blocked])
         datasets_to_write[suffix] = dataset.reset_index(drop=True)
@@ -373,6 +380,7 @@ def _build_training_dataset_from_feature_store(
             "manifest_path": str(_manifest_path(dataset_version)),
             "horizons": [spec.horizon for spec in label_specs],
             "label_specs": {spec.horizon: label_spec_to_dict(spec) for spec in label_specs},
+            "intraday_label_gate": intraday_label_gate,
             "horizon_manifests": horizon_manifests,
             "sample_count_by_horizon": sample_count_by_horizon,
             "class_distribution": class_distribution,
@@ -420,6 +428,7 @@ def _build_training_dataset_from_feature_store(
         "manifest_path": str(_manifest_path(dataset_version)),
         "horizons": [spec.horizon for spec in label_specs],
         "label_specs": {spec.horizon: label_spec_to_dict(spec) for spec in label_specs},
+        "intraday_label_gate": intraday_label_gate,
         "horizon_manifests": horizon_manifests,
         "feature_cols": feature_cols,
         "label_cols": sorted(set(label_cols + [f"tb_label_{int(spec.required_future_bars)}d" for spec in label_specs])),

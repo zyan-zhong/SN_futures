@@ -3,8 +3,16 @@ from __future__ import annotations
 from pathlib import Path
 
 
+def _api_client_surface() -> str:
+    api_dir = Path("frontend/src/api")
+    return "\n".join(
+        (api_dir / name).read_text(encoding="utf-8")
+        for name in ("terminal.ts", "backtest.ts")
+    )
+
+
 def test_each_chart_component_is_backed_by_named_terminal_data_source() -> None:
-    terminal_api = Path("frontend/src/api/terminal.ts").read_text(encoding="utf-8")
+    terminal_api = _api_client_surface()
     chart_sources = {
         "PriceChart": ["/api/terminal/charts/price-history", "getPriceHistory"],
         "ForecastPathChart": ["/api/terminal/charts/forecast-path", "getForecastPath"],

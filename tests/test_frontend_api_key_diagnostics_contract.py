@@ -18,11 +18,15 @@ class FrontendApiKeyDiagnosticsContractTest(unittest.TestCase):
         self.assertNotIn("useLocalSetting(\"SN_NEWSAPI_KEY", text)
 
     def test_terminal_client_exposes_key_diagnostics(self) -> None:
-        text = (ROOT / "frontend" / "src" / "api" / "terminal.ts").read_text(encoding="utf-8")
-        self.assertIn("/api/terminal/settings/key-diagnostics", text)
-        self.assertIn("alpha_vantage", text)
+        terminal = (ROOT / "frontend" / "src" / "api" / "terminal.ts").read_text(encoding="utf-8")
+        settings = (ROOT / "frontend" / "src" / "api" / "settings.ts").read_text(encoding="utf-8")
+        types = (ROOT / "frontend" / "src" / "api" / "types.ts").read_text(encoding="utf-8")
+
+        self.assertIn('from "./settings"', terminal)
+        self.assertIn("getKeyDiagnostics", terminal)
+        self.assertIn("/api/terminal/settings/key-diagnostics", settings)
+        self.assertIn("alpha_vantage", types)
 
 
 if __name__ == "__main__":
     unittest.main()
-

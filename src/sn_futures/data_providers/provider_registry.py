@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from .base import BaseProvider
 from .akshare_news_provider import AkShareNewsProvider
+from .institutional_status_providers import PublicPolicyRssContractProvider, ShfePublicContractProvider, TushareFuturesContractProvider
 from .newsapi_unified_provider import NewsApiNewsProvider
 from .sina_unified_provider import SinaRealtimeQuoteProvider
 
@@ -11,6 +12,9 @@ def build_provider_registry() -> dict[str, BaseProvider]:
         SinaRealtimeQuoteProvider(),
         NewsApiNewsProvider(),
         AkShareNewsProvider(),
+        TushareFuturesContractProvider(),
+        ShfePublicContractProvider(),
+        PublicPolicyRssContractProvider(),
     ]
     return {provider.provider_id: provider for provider in providers}
 

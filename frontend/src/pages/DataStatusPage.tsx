@@ -8,6 +8,8 @@ import { DataSourceStatusPanel } from "../components/data/DataSourceStatusPanel"
 import { RefreshTaskPanel } from "../components/data/RefreshTaskPanel";
 import { RuntimeDiagnosticsPanel } from "../components/data/RuntimeDiagnosticsPanel";
 import { SectionCard } from "../components/layout/SectionCard";
+import { LocalProviderSetupFlow } from "../components/setup/LocalProviderSetupFlow";
+import { LocalProviderSetupPanel } from "../components/setup/LocalProviderSetupPanel";
 
 function sanitizeVisibleSecretTerms(value: unknown): string {
   return String(value ?? "")
@@ -1050,6 +1052,8 @@ export function DataStatusPage({
   return (
     <ErrorBoundary moduleName="数据源状态">
       <div className="page-stack">
+        <LocalProviderSetupFlow />
+        <LocalProviderSetupPanel snapshot={snapshot} />
         <SectionCard title="数据源可观测性" subtitle="刷新失败时可测试数据源、查看最近错误，并导出脱敏诊断信息。">
           <div className="button-row">
             <button className="ghost-button" type="button" onClick={() => handleProviderTest("market")}>
@@ -1101,6 +1105,8 @@ export function DataStatusPage({
           onSettings={() => onNavigate?.("settings")}
           onRefresh={onRefresh}
         />
+        <details aria-label="Advanced Diagnostics" className="technical-details-drawer">
+          <summary>Advanced Diagnostics / Advanced managed proxy</summary>
         <SectionCard
           title="Managed Proxy Operator Onboarding Runbook"
           subtitle="Local setup verification for endpoint, masked token state, templates, and next safe action."
@@ -2060,6 +2066,7 @@ export function DataStatusPage({
             <p>{sanitizeVisibleSecretTerms(featureStoreV12BlockingReasons.join(", ") || "none")}</p>
           </div>
         </SectionCard>
+        </details>
         <SectionCard title="Tushare futures subinterfaces" subtitle="contract info / daily / warehouse / settlement / holding status share the same provider status source.">
           <DataTable
             data={tushare_subinterfaces}

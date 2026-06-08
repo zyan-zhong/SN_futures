@@ -8,6 +8,7 @@ param(
   [switch]$SkipInstall,
   [switch]$KeepInstalled,
   [switch]$RunBrowserSmoke,
+  [switch]$InjectLegacyPrivateSeed,
   [switch]$ExpectPrivateBundleKeys
 )
 
@@ -23,6 +24,7 @@ if (-not $SetupPath) {
 }
 $SmokeLogDir = Join-Path $env:TEMP "SNInsightTerminalSmoke"
 $ReportPath = Join-Path $SmokeLogDir "installed_smoke_report.txt"
+$InstalledRootWasSpecified = [bool]$InstalledRoot
 if (-not $InstalledRoot) {
   $InstalledRoot = Join-Path $env:LOCALAPPDATA "Programs\SNInsightTerminal"
 }
@@ -69,6 +71,76 @@ function Assert-TextNotContains {
     }
   }
   Write-SmokeLog "PASS: $Scope has no forbidden sensitive content."
+}
+
+function Assert-LegacySeedInjectionIsSafe {
+  if (-not $InjectLegacyPrivateSeed) {
+    return
+  }
+  if ($SkipInstall) {
+    throw "InjectLegacyPrivateSeed requires installer execution and cannot be combined with SkipInstall."
+  }
+  if (-not $InstalledRootWasSpecified) {
+    throw "InjectLegacyPrivateSeed requires an explicit temporary InstalledRoot."
+  }
+
+  $fullInstallRoot = [System.IO.Path]::GetFullPath($InstallDir)
+  $tempRoot = [System.IO.Path]::GetFullPath([System.IO.Path]::GetTempPath())
+  $defaultInstallRoot = [System.IO.Path]::GetFullPath((Join-Path $env:LOCALAPPDATA "Programs\SNInsightTerminal"))
+  if ($fullInstallRoot.Equals($defaultInstallRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
+    throw "InjectLegacyPrivateSeed cannot target the default Programs\SNInsightTerminal install root."
+  }
+  if (-not $fullInstallRoot.StartsWith($tempRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
+    throw "InjectLegacyPrivateSeed requires an explicit temporary InstalledRoot under the system temp directory."
+  }
+  $leaf = Split-Path -Leaf $fullInstallRoot
+  if (-not ($leaf -like "SNInsightTerminalInstall_*")) {
+    throw "InjectLegacyPrivateSeed requires an explicit temporary InstalledRoot named SNInsightTerminalInstall_*."
+  }
+}
+
+function Seed-LegacyPrivateBundle {
+  if (-not $InjectLegacyPrivateSeed) {
+    return
+  }
+  Assert-LegacySeedInjectionIsSafe
+  $legacyPrivateDir = Join-Path $InstallDir "_internal\private"
+  New-Item -ItemType Directory -Force -Path $legacyPrivateDir | Out-Null
+  $legacySecrets = @{
+    schema_version = 1
+    secrets = @{
+      SN_ALPHA_VANTAGE_KEY = "LEGACY_ALPHA_PRIVATE_SEED_SHOULD_BE_REMOVED"
+      SN_NEWSAPI_KEY = "LEGACY_NEWS_PRIVATE_SEED_SHOULD_BE_REMOVED"
+      SN_TUSHARE_TOKEN = "LEGACY_TUSHARE_PRIVATE_SEED_SHOULD_BE_REMOVED"
+    }
+  } | ConvertTo-Json -Depth 6
+  Set-Content -Encoding UTF8 -Path (Join-Path $legacyPrivateDir "private_bundle_seed.json") -Value $legacySecrets
+  Set-Content -Encoding UTF8 -Path (Join-Path $legacyPrivateDir "private_release_keys.json") -Value $legacySecrets
+  Set-Content -Encoding UTF8 -Path (Join-Path $legacyPrivateDir "secrets.json") -Value $legacySecrets
+  Set-Content -Encoding UTF8 -Path (Join-Path $legacyPrivateDir ".env") -Value "SN_ALPHA_VANTAGE_KEY=LEGACY_ALPHA_PRIVATE_SEED_SHOULD_BE_REMOVED"
+  Write-SmokeLog "Seeded legacy private bundle files under temporary install root."
+}
+
+function Assert-LegacyPrivateBundleRemoved {
+  if (-not $InjectLegacyPrivateSeed) {
+    return
+  }
+  $legacyPrivateDir = Join-Path $InstallDir "_internal\private"
+  $legacyFiles = @(
+    (Join-Path $legacyPrivateDir "private_bundle_seed.json"),
+    (Join-Path $legacyPrivateDir "private_release_keys.json"),
+    (Join-Path $legacyPrivateDir "secrets.json"),
+    (Join-Path $legacyPrivateDir ".env")
+  )
+  foreach ($legacyFile in $legacyFiles) {
+    Assert-True (-not (Test-Path $legacyFile)) "legacy private bundle seed is removed from install root"
+  }
+  if (Test-Path $legacyPrivateDir) {
+    $remaining = @(Get-ChildItem -LiteralPath $legacyPrivateDir -Force -ErrorAction SilentlyContinue)
+    Assert-True ($remaining.Count -eq 0) "legacy private directory is empty or absent after install"
+  } else {
+    Assert-True $true "legacy private directory is empty or absent after install"
+  }
 }
 
 function Stop-InstalledProcesses {
@@ -283,6 +355,7 @@ try {
   Configure-IsolatedSmokeEnvironment
   Assert-True (Test-Path $SetupPath) "installer exists: $SetupPath"
   Stop-InstalledProcesses
+  Seed-LegacyPrivateBundle
 
   if (-not $SkipInstall) {
     Write-SmokeLog "Starting silent install."
@@ -296,6 +369,7 @@ try {
     )
     $installer = Start-Process -FilePath $SetupPath -ArgumentList $installArgs -Wait -PassThru
     Assert-True ($installer.ExitCode -eq 0) "installer exit code is 0"
+    Assert-LegacyPrivateBundleRemoved
   }
 
   Assert-True (Test-Path $InstallDir) "install directory exists: $InstallDir"

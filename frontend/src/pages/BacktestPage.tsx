@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { getBacktestDiagnostics, getResearchBacktestReport, runResearchBacktest } from "../api/terminal";
-import type { BacktestDiagnostics, ResearchBacktestHorizon, ResearchBacktestPayload } from "../api/types";
+import { getAuditableResearchBacktest, getBacktestDiagnostics, getResearchBacktestReport, runResearchBacktest } from "../api/terminal";
+import type { AuditableBacktestPayload, BacktestDiagnostics, ResearchBacktestHorizon, ResearchBacktestPayload } from "../api/types";
 import { BacktestPanel } from "../components/backtest/BacktestPanel";
 import { CostSensitivityPanel } from "../components/backtest/CostSensitivityPanel";
 import { InstitutionalValidationPanel } from "../components/backtest/InstitutionalValidationPanel";
@@ -99,10 +99,50 @@ function curveRows(payload: ResearchBacktestPayload | null, key: "equity_curve" 
   return [];
 }
 
+function auditableEquityRows(payload?: AuditableBacktestPayload | null) {
+  return asArray<Record<string, unknown>>(payload?.equity)
+    .map((item) => {
+      const point = asRecord(item);
+      const number = toFiniteNumber(point.equity ?? point.value);
+      if (number === null) return null;
+      return {
+        ts: formatNullable(point.trade_date ?? point.datetime ?? point.timestamp ?? point.time, ""),
+        value: number
+      };
+    })
+    .filter((item): item is { ts: string; value: number } => item !== null);
+}
+
+function auditableMetricRows(payload?: AuditableBacktestPayload | null) {
+  return Object.entries(asRecord(payload?.metrics)).map(([key, value]) => ({ key, value }));
+}
+
+function auditableTradeRows(payload?: AuditableBacktestPayload | null) {
+  return asArray<Record<string, unknown>>(payload?.trades).slice(0, 20);
+}
+
+function auditableManifestRows(payload?: AuditableBacktestPayload | null) {
+  const manifest = asRecord(payload?.manifest);
+  return [
+    { key: "BacktestManifest", value: payload?.manifest_path },
+    { key: "run_id", value: manifest.run_id ?? payload?.run_id },
+    { key: "data_manifest_hash", value: manifest.data_manifest_hash },
+    { key: "signal_manifest_hash", value: manifest.signal_manifest_hash },
+    { key: "chart_payload_input_used", value: manifest.chart_payload_input_used ?? payload?.chart_payload_input_used },
+    { key: "display_payload_input_used", value: manifest.display_payload_input_used ?? payload?.display_payload_input_used },
+    { key: "sample_data_used", value: manifest.sample_data_used ?? payload?.sample_data_used },
+    { key: "baseline_used", value: manifest.baseline_used ?? payload?.baseline_used },
+    { key: "lookahead_check_pass", value: manifest.lookahead_check_pass }
+  ];
+}
+
 export function BacktestPage() {
   const [horizon, setHorizon] = useState("tomorrow");
   const [researchVersion, setResearchVersion] = useState("v4");
   const [researchBacktest, setResearchBacktest] = useState<ResearchBacktestPayload | null>(null);
+  const [auditableBacktest, setAuditableBacktest] = useState<AuditableBacktestPayload | null>(null);
+  const [auditableLoading, setAuditableLoading] = useState(false);
+  const [auditableError, setAuditableError] = useState<string | null>(null);
   const [researchReportLoading, setResearchReportLoading] = useState(false);
   const [researchLoading, setResearchLoading] = useState(false);
   const [researchError, setResearchError] = useState<string | null>(null);
@@ -111,6 +151,10 @@ export function BacktestPage() {
   const researchRows = useMemo(() => backtestRows(researchBacktest), [researchBacktest]);
   const equityCurve = useMemo(() => curveRows(researchBacktest, "equity_curve"), [researchBacktest]);
   const drawdownCurve = useMemo(() => curveRows(researchBacktest, "drawdown_curve"), [researchBacktest]);
+  const auditableEquity = useMemo(() => auditableEquityRows(auditableBacktest), [auditableBacktest]);
+  const auditableMetrics = useMemo(() => auditableMetricRows(auditableBacktest), [auditableBacktest]);
+  const auditableTrades = useMemo(() => auditableTradeRows(auditableBacktest), [auditableBacktest]);
+  const auditableManifest = useMemo(() => auditableManifestRows(auditableBacktest), [auditableBacktest]);
 
   const loadResearchBacktestReport = useCallback(async () => {
     setResearchReportLoading(true);
@@ -129,6 +173,23 @@ export function BacktestPage() {
   useEffect(() => {
     void loadResearchBacktestReport();
   }, [loadResearchBacktestReport]);
+
+  const loadAuditableBacktest = useCallback(async () => {
+    setAuditableLoading(true);
+    setAuditableError(null);
+    try {
+      setAuditableBacktest(await getAuditableResearchBacktest({ input_id: "sn_main" }));
+    } catch (err) {
+      setAuditableBacktest(null);
+      setAuditableError(err instanceof Error ? err.message : "Auditable backtest 暂时无法读取。");
+    } finally {
+      setAuditableLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadAuditableBacktest();
+  }, [loadAuditableBacktest]);
 
   async function handleRunResearchBacktest() {
     setResearchLoading(true);
@@ -180,6 +241,82 @@ export function BacktestPage() {
       <ErrorBoundary moduleName="机构级验证">
         <InstitutionalValidationPanel />
       </ErrorBoundary>
+
+      <SectionCard
+        title="Auditable Research Backtest"
+        subtitle="BacktestManifest + metrics + equity + trades"
+        actions={
+          <button className="secondary-button" type="button" onClick={loadAuditableBacktest} disabled={auditableLoading}>
+            Refresh
+          </button>
+        }
+      >
+        {auditableLoading ? <LoadingState label="Reading auditable backtest..." /> : null}
+        {auditableError ? <ErrorState message={auditableError} onRetry={loadAuditableBacktest} /> : null}
+        {!auditableLoading && !auditableError ? (
+          <>
+            <div className="metric-grid compact">
+              <div className="metric-card">
+                <span className="metric-label">status</span>
+                <strong>{formatNullable(auditableBacktest?.status, "blocked")}</strong>
+                <small>{formatNullable(auditableBacktest?.run_id, "no run")}</small>
+              </div>
+              <div className="metric-card">
+                <span className="metric-label">error_code</span>
+                <strong>{formatNullable(auditableBacktest?.error_code, "none")}</strong>
+                <small>BacktestManifest input gate</small>
+              </div>
+              <div className="metric-card">
+                <span className="metric-label">read_only</span>
+                <strong>{auditableBacktest?.read_only === false ? "false" : "true"}</strong>
+                <small>backtest_invoked={String(auditableBacktest?.backtest_invoked ?? false)}</small>
+              </div>
+              <div className="metric-card">
+                <span className="metric-label">blocked</span>
+                <strong>{asArray(auditableBacktest?.blocking_reasons).length}</strong>
+                <small>{asArray(auditableBacktest?.blocking_reasons).slice(0, 2).join(", ") || "none"}</small>
+              </div>
+            </div>
+
+            {auditableBacktest?.status === "success" && auditableEquity.length ? (
+              <EquityCurveChart data={auditableEquity} />
+            ) : (
+              <EmptyState label="No auditable equity" description="Blocked or missing BacktestManifest output keeps the chart empty." />
+            )}
+
+            <div className="two-column">
+              <DataTable
+                data={auditableMetrics}
+                emptyLabel="No auditable metrics"
+                columns={[
+                  { key: "key", title: "metric" },
+                  { key: "value", title: "value", render: (row) => formatNullable(row.value) }
+                ]}
+              />
+              <DataTable
+                data={auditableTrades}
+                emptyLabel="No auditable trades"
+                columns={[
+                  { key: "trade_date", title: "trade_date", render: (row) => formatNullable(row.trade_date ?? row.timestamp ?? row.datetime) },
+                  { key: "side", title: "side", render: (row) => formatNullable(row.side ?? row.position ?? row.signal) },
+                  { key: "price", title: "price", render: (row) => formatNullable(row.price ?? row.entry_price ?? row.exit_price) },
+                  { key: "pnl", title: "pnl", render: (row) => formatNullable(row.pnl ?? row.realized_pnl ?? row.net_pnl) }
+                ]}
+              />
+            </div>
+
+            <TechnicalDetailsDrawer title="BacktestManifest">
+              <DataTable
+                data={auditableManifest}
+                columns={[
+                  { key: "key", title: "field" },
+                  { key: "value", title: "value", render: (row) => formatNullable(row.value) }
+                ]}
+              />
+            </TechnicalDetailsDrawer>
+          </>
+        ) : null}
+      </SectionCard>
 
       <SectionCard
         title="研究型收益曲线"

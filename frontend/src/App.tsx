@@ -55,7 +55,7 @@ export default function App() {
   const { data: snapshot, error, loading, refresh } = useTerminalSnapshot(30000);
   const firstRun = useFirstRun();
   const [uiMode, setUIMode] = useLocalSetting<"simple" | "professional">("uiMode", "simple");
-  const [showSampleData] = useLocalSetting("showSampleData", true);
+  const [showSampleData] = useLocalSetting("showSampleData", false);
   const [autoStopBackendOnClose] = useLocalSetting("autoStopBackendOnClose", true);
 
   useEffect(() => {

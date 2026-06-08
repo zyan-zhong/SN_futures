@@ -32,6 +32,9 @@ def test_factor_page_mentions_tushare_coverage_fields() -> None:
 
 
 def test_terminal_client_can_save_tushare_token() -> None:
-    content = (ROOT / "frontend" / "src" / "api" / "terminal.ts").read_text(encoding="utf-8")
+    terminal = (ROOT / "frontend" / "src" / "api" / "terminal.ts").read_text(encoding="utf-8")
+    settings = (ROOT / "frontend" / "src" / "api" / "settings.ts").read_text(encoding="utf-8")
 
-    assert "SN_TUSHARE_TOKEN" in content
+    assert 'from "./settings"' in terminal
+    assert "saveSettingsSecrets" in terminal
+    assert "SN_TUSHARE_TOKEN" in settings

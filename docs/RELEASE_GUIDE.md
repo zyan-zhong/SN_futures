@@ -81,6 +81,23 @@ Smoke setup and uninstall logs are written under `%TEMP%\SNInsightTerminalSmoke`
 
 `-ExpectPrivateBundleKeys` is disabled and must not be used as an acceptance path. Provider keys stay in the installed user's local config only; the smoke clears provider key environment variables before launching the terminal.
 
+### Upgrade Cleanup Smoke
+
+Before publishing an installer, validate that overlay install removes stale private bundle files left by older builds:
+
+```powershell
+$installRoot = Join-Path $env:TEMP ("SNInsightTerminalInstall_" + [guid]::NewGuid().ToString("N"))
+.\packaging\smoke_installed.ps1 `
+  -SetupPath release\SNInsightTerminal_Setup.exe `
+  -InstalledRoot $installRoot `
+  -UseTempDataDir `
+  -ApiPort 8766 `
+  -TimeoutSeconds 90 `
+  -InjectLegacyPrivateSeed
+```
+
+`-InjectLegacyPrivateSeed` is allowed only with an explicit temporary `-InstalledRoot`. It seeds obsolete `{app}\_internal\private` files before install and verifies the installer removes them. It must never target the default user install directory or `%LOCALAPPDATA%\SNInsightTerminal` user data.
+
 ## Release Artifacts
 
 Expected release outputs:

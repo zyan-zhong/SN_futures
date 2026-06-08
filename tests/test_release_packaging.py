@@ -21,8 +21,13 @@ class ReleasePackagingTest(unittest.TestCase):
         self.assertIn("PrivilegesRequired=lowest", iss)
         self.assertIn("{localappdata}\\Programs\\SNInsightTerminal", iss)
         self.assertIn("SNInsightTerminal_Setup", iss)
-        self.assertNotIn(".env", iss)
-        self.assertNotIn("secrets.json", iss)
+        files_section = iss.split("[Files]", 1)[1].split("[", 1)[0]
+        install_delete_section = iss.split("[InstallDelete]", 1)[1].split("[", 1)[0]
+        self.assertNotIn(".env", files_section)
+        self.assertNotIn("secrets.json", files_section)
+        self.assertIn('{app}\\_internal\\private\\.env', install_delete_section)
+        self.assertIn('{app}\\_internal\\private\\secrets.json', install_delete_section)
+        self.assertNotIn("{localappdata}\\SNInsightTerminal", install_delete_section)
 
     def test_build_release_script_checks_frontend_dist_and_tooling(self) -> None:
         script = (ROOT / "packaging" / "build_release.ps1").read_text(encoding="utf-8")

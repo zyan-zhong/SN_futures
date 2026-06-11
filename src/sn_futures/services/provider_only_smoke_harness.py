@@ -22,6 +22,8 @@ from .local_api_provider_http_adapter import LocalApiProviderHttpAdapter
 
 PROVIDER_ONLY_SMOKE_SCHEMA_VERSION = "provider-only-smoke-harness-v1"
 DEFAULT_PROVIDERS = (
+    "alpha_vantage",
+    "newsapi",
     "akshare_news",
     "tushare_futures",
     "shfe_public",
@@ -230,31 +232,35 @@ def _run_one_provider(
     runtime: Path,
 ) -> ProviderResult:
     provider = str(provider_id or "").strip().lower()
+    if provider == "alpha_vantage":
+        return _blocked_result(provider, "daily_bar", "skipped_no_remote", allow_remote=allow_remote)
+    if provider == "newsapi":
+        return _blocked_result(provider, "news_event", "skipped_no_remote", allow_remote=allow_remote)
     if provider == "akshare_news":
         if fake_client is None and not allow_remote:
-            return _blocked_result(provider, "news", "remote_http_disabled", allow_remote=allow_remote)
+            return _blocked_result(provider, "news", "skipped_no_remote", allow_remote=allow_remote)
         return AkShareNewsProvider(ak_module=fake_client if fake_client is not None else None, max_rows_per_source=50).fetch(
             persist=False,
             output_dir=runtime / "outputs",
         )
     if provider == "tushare_futures":
         if fake_client is None and not allow_remote:
-            return _blocked_result(provider, "futures_fundamentals", "remote_http_disabled", allow_remote=allow_remote)
+            return _blocked_result(provider, "futures_fundamentals", "skipped_no_remote", allow_remote=allow_remote)
         return TushareFuturesContractProvider(client=fake_client, token="provider-only-smoke-token").fetch(
             persist=False,
             output_dir=runtime / "outputs",
         )
     if provider == "shfe_public":
         if fake_client is None and not allow_remote:
-            return _blocked_result(provider, "exchange_public", "remote_http_disabled", allow_remote=allow_remote)
+            return _blocked_result(provider, "exchange_public", "skipped_no_remote", allow_remote=allow_remote)
         return ShfePublicContractProvider(client=fake_client).fetch(persist=False, output_dir=runtime / "outputs")
     if provider == "public_policy_rss":
         if fake_client is None and not allow_remote:
-            return _blocked_result(provider, "policy", "remote_http_disabled", allow_remote=allow_remote)
+            return _blocked_result(provider, "policy", "skipped_no_remote", allow_remote=allow_remote)
         return PublicPolicyRssContractProvider(client=fake_client).fetch(persist=False, output_dir=runtime / "outputs")
     if provider == "local_api_provider":
         if fake_client is None and not allow_remote:
-            return _blocked_result(provider, "market_daily_bar", "remote_http_disabled", allow_remote=allow_remote)
+            return _blocked_result(provider, "market_daily_bar", "skipped_no_remote", allow_remote=allow_remote)
         adapter = LocalApiProviderHttpAdapter(
             provider_id=provider,
             base_url=_LOCAL_FAKE_BASE_URL,

@@ -1,0 +1,28 @@
+# System Acceptance Matrix
+
+This matrix freezes the current Public Terminal acceptance state. Every row must be one of:
+
+- `usable`: the customer can complete the workflow with real or mocked contract data.
+- `blocked_with_reason`: the workflow is visible and intentionally blocked with a clear user-facing reason.
+- `dev_only`: the workflow is hidden from Public Terminal and only available after explicit dev mode.
+- `unsupported_with_reason`: the workflow is intentionally not available yet and has a visible reason or documented boundary.
+
+Public Terminal must not train, generate prediction values, run research backtests, build feature stores, call real providers by default, show demo outputs, leak raw secrets, or give buy/sell advice.
+
+| feature_id | feature | state | public_or_dev | user_visible_reason | evidence | tests |
+|---|---|---|---|---|---|---|
+| install_start | Install and first start | usable | installer | App opens into the simplified Public Terminal shell after installed start. | Local installer smoke checks installed launch paths without committing release outputs. | packaging/smoke_installed.ps1; frontend/e2e/system-acceptance.spec.ts |
+| no_key | First launch without provider key | blocked_with_reason | public | User sees that setup or skipped setup is required before data refresh and prediction. | Public readiness returns provider key and data watermark blockers. | tests/test_system_acceptance_contract.py; frontend/e2e/system-acceptance.spec.ts |
+| setup | Set Local API Provider key | usable | public | User can save provider settings and sees only masked key status. | Public settings save/status endpoints return masked values only. | tests/test_public_terminal_openapi_contract.py; frontend/e2e/system-acceptance.spec.ts |
+| provider_smoke | Provider-only smoke | usable | public | User sees success or a blocked reason such as no rows or provider not configured. | Public smoke endpoint is diagnostic-only and defaults to no remote API. | tests/test_provider_closed_loop_contract.py; frontend/e2e/system-acceptance.spec.ts |
+| refresh | Refresh data status | usable | public | User sees queued/running/success or a blocked reason for missing provider smoke or data. | Public refresh task endpoints expose status and never invoke training or prediction. | tests/test_public_terminal_api_contracts.py; frontend/e2e/system-acceptance.spec.ts |
+| market | Watch board and market data | usable | public | User sees market bars when available or a missing data reason when blocked. | Public market service reads Data Layer and blocks sample charts. | tests/test_public_market_indicators_contract.py; frontend/e2e/system-acceptance.spec.ts |
+| indicators | Technical indicators | usable | public | User sees RSI, MACD, SMA, volatility only when enough bars exist; otherwise a blocked reason is shown. | Indicator manifest denies prediction use when data is stale or insufficient. | tests/test_public_market_indicators_contract.py; frontend/e2e/system-acceptance.spec.ts |
+| news_events | News policy and event center | usable | public | User sees source, publish time, category, relevance, and block reason per event. | Event center separates source_published_at and fetched_at and rejects unrelated events. | tests/test_public_event_center_contract.py; frontend/e2e/system-acceptance.spec.ts |
+| reports | Reports | usable | public | User sees report coverage or insufficient data; export is disabled when blocked. | Public report is research-only and contains no investment advice. | tests/test_public_event_center_contract.py; frontend/e2e/system-acceptance.spec.ts |
+| prediction_blocked | Customer prediction | blocked_with_reason | public | User sees prediction readiness or blocked reasons, never price, direction, or probability values. | Prediction readiness and realtime dry-run expose gates only. | tests/test_public_prediction_core_readiness_contract.py; tests/test_realtime_prediction_loop_contract.py; frontend/e2e/system-acceptance.spec.ts |
+| diagnostics | Diagnostics and copy | usable | public | User can update and copy sanitized public diagnostics. | Diagnostics copy excludes raw secrets and public pages use public clients only. | tests/test_frontend_public_terminal_api_contracts.py; frontend/e2e/system-acceptance.spec.ts |
+| dev_mode_hidden | Legacy and research console hidden | dev_only | dev-only | Public users do not see candidate research, governance, training data, feature store, managed proxy, or legacy backtest entries. | Dev console appears only after explicit dev mode flag. | tests/test_system_acceptance_contract.py; frontend/e2e/system-acceptance.spec.ts |
+| no_demo_fake | No demo or fake output | blocked_with_reason | safety | Public payloads and research pipelines block demo, fake, sample, and baseline artifacts. | Data safety firewall blocks dirty payloads and fixture manifests from public/training/prediction/backtest. | tests/test_no_demo_public_firewall.py; frontend/e2e/system-acceptance.spec.ts |
+| no_raw_secrets | No raw secret exposure | blocked_with_reason | safety | User sees masked key status only and copied diagnostics exclude raw tokens. | OpenAPI schema and frontend types reject raw secret field names. | tests/test_public_terminal_openapi_contract.py; tests/test_frontend_public_terminal_api_contracts.py; frontend/e2e/system-acceptance.spec.ts |
+| no_buy_sell_advice | No trade advice | blocked_with_reason | safety | Public UI does not show actionable trade advice, price targets, or direction recommendations. | Public reports are research-only and prediction values are forbidden. | tests/test_system_acceptance_contract.py; tests/test_realtime_prediction_loop_contract.py; frontend/e2e/system-acceptance.spec.ts |

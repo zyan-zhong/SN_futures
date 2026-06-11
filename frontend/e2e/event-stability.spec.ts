@@ -4,6 +4,7 @@ test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {
     window.localStorage.clear();
     window.sessionStorage.clear();
+    window.localStorage.setItem("SN_ENABLE_DEV_CONSOLE", "1");
     window.localStorage.setItem("firstRunCompleted", "true");
     window.localStorage.setItem("showSampleData", "true");
     window.localStorage.setItem("uiMode", JSON.stringify("professional"));

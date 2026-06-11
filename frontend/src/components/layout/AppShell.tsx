@@ -14,6 +14,7 @@ export function AppShell({
   onModeChange,
   summary,
   uiMode,
+  showGlobalTaskBar,
   children
 }: {
   current: PageKey;
@@ -21,6 +22,7 @@ export function AppShell({
   onModeChange: (mode: UIMode) => void;
   summary?: TerminalSummary;
   uiMode: UIMode;
+  showGlobalTaskBar?: boolean;
   children: ReactNode;
 }) {
   return (
@@ -29,13 +31,13 @@ export function AppShell({
       <div className="workspace">
         <TopStatusBar summary={summary} />
         <main>
-          <ErrorBoundary moduleName="主内容区域" onHome={() => onNavigate("dashboard")}>
+          <ErrorBoundary moduleName="主内容区域" onHome={() => onNavigate("public-home")}>
             {children}
           </ErrorBoundary>
         </main>
         <footer className="compliance-footer">{COPY.disclaimer}</footer>
       </div>
-      <GlobalTaskBar />
+      {showGlobalTaskBar ? <GlobalTaskBar /> : null}
     </div>
   );
 }

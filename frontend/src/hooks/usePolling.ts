@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 export function usePolling<T>(loader: () => Promise<T>, intervalMs: number, enabled = true) {
   const [data, setData] = useState<T | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(enabled);
   const mounted = useRef(true);
   const backoff = useRef(intervalMs);
   const timer = useRef<number | null>(null);
@@ -32,7 +32,11 @@ export function usePolling<T>(loader: () => Promise<T>, intervalMs: number, enab
 
   useEffect(() => {
     mounted.current = true;
-    if (!enabled) return undefined;
+    if (!enabled) {
+      setLoading(false);
+      setError(null);
+      return undefined;
+    }
 
     const schedule = (delay: number) => {
       if (timer.current !== null) window.clearTimeout(timer.current);

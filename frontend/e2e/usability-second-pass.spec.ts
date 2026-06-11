@@ -124,20 +124,26 @@ test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {
     window.localStorage.clear();
     window.sessionStorage.clear();
+    window.localStorage.setItem("SN_ENABLE_DEV_CONSOLE", "1");
     window.localStorage.setItem("firstRunCompleted", "true");
     window.localStorage.setItem("showSampleData", "true");
   });
   await installUsabilityMocks(page);
 });
 
-test("simple mode defaults to six workspace entries and renders clean operational copy", async ({ page }) => {
+test("simple mode defaults to seven workspace entries and renders clean operational copy", async ({ page }) => {
   await page.goto("./");
 
   await expect(page.locator("[data-testid='simple-nav']")).toBeVisible();
-  await expect(page.locator(".sidebar .nav-item")).toHaveCount(6);
-  await expect(page.getByText("Terminal Overview").first()).toBeVisible();
-  await expect(page.getByText("Prediction Workspace").first()).toBeVisible();
-  await expect(page.locator(".simple-dashboard-grid .metric-card")).toHaveCount(6);
+  await expect(page.locator(".sidebar .nav-item")).toHaveCount(7);
+  await expect(page.getByText("Home").first()).toBeVisible();
+  await expect(page.getByText("Setup").first()).toBeVisible();
+  await expect(page.getByText("Data Status").first()).toBeVisible();
+  await expect(page.getByText("Market").first()).toBeVisible();
+  await expect(page.getByText("Events").first()).toBeVisible();
+  await expect(page.getByText("Reports").first()).toBeVisible();
+  await expect(page.getByText("Diagnostics").first()).toBeVisible();
+  await expect(page.locator("main").getByText("当前状态").first()).toBeVisible();
 
   const text = await page.locator("body").innerText();
   expect(text).not.toContain("undefined");

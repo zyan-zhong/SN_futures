@@ -14,7 +14,7 @@ export interface FirstRunState {
   complete: () => void;
 }
 
-export function useFirstRun(): FirstRunState {
+export function useFirstRun(enabled = true): FirstRunState {
   const [loading, setLoading] = useState(true);
   const [shouldShow, setShouldShow] = useState(false);
   const [settings, setSettings] = useState<TerminalSettingsStatus | undefined>();
@@ -23,6 +23,12 @@ export function useFirstRun(): FirstRunState {
   const [error, setError] = useState<string | undefined>();
 
   const refresh = useCallback(async () => {
+    if (!enabled) {
+      setLoading(false);
+      setShouldShow(false);
+      setError(undefined);
+      return;
+    }
     setLoading(true);
     setError(undefined);
     const [settingsResult, dataResult, healthResult] = await Promise.allSettled([
@@ -45,7 +51,7 @@ export function useFirstRun(): FirstRunState {
     const firstError = [settingsResult, dataResult, healthResult].find((item) => item.status === "rejected");
     setError(firstError?.status === "rejected" ? (firstError.reason instanceof Error ? firstError.reason.message : "首次启动检查失败") : undefined);
     setLoading(false);
-  }, []);
+  }, [enabled]);
 
   const complete = useCallback(() => {
     markFirstRunCompleted();
@@ -53,9 +59,13 @@ export function useFirstRun(): FirstRunState {
   }, []);
 
   useEffect(() => {
+    if (!enabled) {
+      setLoading(false);
+      setShouldShow(false);
+      return;
+    }
     void refresh();
-  }, [refresh]);
+  }, [enabled, refresh]);
 
   return { loading, shouldShow, settings, dataSources, systemHealth, error, refresh, complete };
 }
-

@@ -9,6 +9,7 @@ import { useFirstRun } from "./hooks/useFirstRun";
 import { useLocalSetting } from "./hooks/useLocalSetting";
 import { useTerminalSnapshot } from "./hooks/useTerminalSnapshot";
 import { DashboardPage } from "./pages/DashboardPage";
+import { isDevConsoleEnabled } from "./utils/devMode";
 
 const BacktestPage = lazy(() => import("./pages/BacktestPage").then((module) => ({ default: module.BacktestPage })));
 const DataStatusPage = lazy(() => import("./pages/DataStatusPage").then((module) => ({ default: module.DataStatusPage })));
@@ -28,8 +29,22 @@ const PredictionWorkspacePage = lazy(() => import("./pages/PredictionWorkspacePa
 const DataOnboardingPage = lazy(() => import("./pages/DataOnboardingPage").then((module) => ({ default: module.DataOnboardingPage })));
 const CandidateResearchPage = lazy(() => import("./pages/CandidateResearchPage").then((module) => ({ default: module.CandidateResearchPage })));
 const ResearchArchivePage = lazy(() => import("./pages/ResearchArchivePage").then((module) => ({ default: module.ResearchArchivePage })));
+const PublicTerminalPage = lazy(() => import("./public_terminal/PublicTerminalPage").then((module) => ({ default: module.PublicTerminalPage })));
+const PublicSetupPage = lazy(() => import("./public_terminal/PublicSetupPage").then((module) => ({ default: module.PublicSetupPage })));
+const PublicDataStatusPage = lazy(() => import("./public_terminal/PublicDataStatusPage").then((module) => ({ default: module.PublicDataStatusPage })));
+const PublicMarketPage = lazy(() => import("./public_terminal/PublicMarketPage").then((module) => ({ default: module.PublicMarketPage })));
+const PublicEventCenterPage = lazy(() => import("./public_terminal/PublicEventCenterPage").then((module) => ({ default: module.PublicEventCenterPage })));
+const PublicReportsPage = lazy(() => import("./public_terminal/PublicReportsPage").then((module) => ({ default: module.PublicReportsPage })));
+const PublicDiagnosticsPage = lazy(() => import("./public_terminal/PublicDiagnosticsPage").then((module) => ({ default: module.PublicDiagnosticsPage })));
 
 export type PageKey =
+  | "public-home"
+  | "public-setup"
+  | "public-data-status"
+  | "public-market"
+  | "public-events"
+  | "public-reports"
+  | "public-diagnostics"
   | "dashboard"
   | "market"
   | "predictions"
@@ -51,12 +66,15 @@ export type PageKey =
   | "research-archive";
 
 export default function App() {
-  const [page, setPage] = useState<PageKey>("dashboard");
-  const { data: snapshot, error, loading, refresh } = useTerminalSnapshot(30000);
-  const firstRun = useFirstRun();
+  const [page, setPage] = useState<PageKey>("public-home");
   const [uiMode, setUIMode] = useLocalSetting<"simple" | "professional">("uiMode", "simple");
   const [showSampleData] = useLocalSetting("showSampleData", false);
   const [autoStopBackendOnClose] = useLocalSetting("autoStopBackendOnClose", true);
+  const devConsoleEnabled = isDevConsoleEnabled();
+  const effectiveUIMode = devConsoleEnabled ? uiMode : "simple";
+  const legacyTerminalAdaptersEnabled = devConsoleEnabled && effectiveUIMode === "professional";
+  const firstRun = useFirstRun(legacyTerminalAdaptersEnabled);
+  const { data: snapshot, error, loading, refresh } = useTerminalSnapshot(30000, legacyTerminalAdaptersEnabled);
 
   useEffect(() => {
     const isDesktopLaunch = new URLSearchParams(window.location.search).get("desktop") === "1";
@@ -106,6 +124,20 @@ export default function App() {
       return <ErrorState message={error} onRetry={refresh} />;
     }
     switch (page) {
+      case "public-home":
+        return <PublicTerminalPage />;
+      case "public-setup":
+        return <PublicSetupPage />;
+      case "public-data-status":
+        return <PublicDataStatusPage />;
+      case "public-market":
+        return <PublicMarketPage />;
+      case "public-events":
+        return <PublicEventCenterPage />;
+      case "public-reports":
+        return <PublicReportsPage />;
+      case "public-diagnostics":
+        return <PublicDiagnosticsPage />;
       case "dashboard":
         return <DashboardPage snapshot={visibleSnapshot} onRefresh={refresh} showSampleData={showSampleData} />;
       case "market":
@@ -145,13 +177,20 @@ export default function App() {
       case "research-archive":
         return <ResearchArchivePage />;
       default:
-        return <DashboardPage snapshot={visibleSnapshot} showSampleData={showSampleData} />;
+        return <PublicTerminalPage />;
     }
   }
 
   return (
-    <UIModeProvider value={{ uiMode, setUIMode }}>
-      <AppShell current={page} onModeChange={setUIMode} onNavigate={setPage} summary={visibleSnapshot?.summary} uiMode={uiMode}>
+    <UIModeProvider value={{ uiMode: effectiveUIMode, setUIMode }}>
+      <AppShell
+        current={page}
+        onModeChange={setUIMode}
+        onNavigate={setPage}
+        showGlobalTaskBar={legacyTerminalAdaptersEnabled}
+        summary={visibleSnapshot?.summary}
+        uiMode={effectiveUIMode}
+      >
         <SampleModeBanner visible={Boolean(snapshot?.sample_mode && showSampleData)} message={snapshot?.sample_banner_zh} />
         {error && visibleSnapshot ? <div className="inline-warning">接口刷新失败，保留上次数据：{error}</div> : null}
         <Suspense fallback={<LoadingState label="加载中..." />}>

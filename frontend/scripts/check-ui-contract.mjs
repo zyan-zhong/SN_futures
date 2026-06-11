@@ -9,7 +9,9 @@ const allowedLocalStorageKeys = new Set([
   "refreshInterval",
   "theme",
   "showSampleData",
-  "autoStopBackendOnClose"
+  "autoStopBackendOnClose",
+  "SN_ENABLE_DEV_CONSOLE",
+  "sn_enable_dev_console"
 ]);
 const forbiddenTerms = [
   ["保证", "盈利"].join(""),

@@ -32,7 +32,7 @@ def _terminal_docs_paths() -> set[str]:
     return {
         str(item.get("path"))
         for item in payload.get("endpoints", [])
-        if isinstance(item, dict) and item.get("path")
+        if isinstance(item, dict) and str(item.get("path", "")).startswith("/api/terminal/")
     }
 
 

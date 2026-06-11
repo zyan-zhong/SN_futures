@@ -9,8 +9,43 @@ type RequestOptions = {
   dedupe?: boolean;
 };
 
+type ApiErrorOptions = {
+  status: number;
+  payload: unknown;
+  error_code?: string;
+  blocking_reasons?: string[];
+  details_sanitized?: Record<string, unknown>;
+  reason?: string;
+};
+
+export class ApiError extends Error {
+  readonly status: number;
+  readonly payload: unknown;
+  readonly error_code?: string;
+  readonly blocking_reasons?: string[];
+  readonly details_sanitized?: Record<string, unknown>;
+  readonly reason?: string;
+
+  constructor(message: string, options: ApiErrorOptions) {
+    super(message);
+    this.name = "ApiError";
+    this.status = options.status;
+    this.payload = options.payload;
+    this.error_code = options.error_code;
+    this.blocking_reasons = options.blocking_reasons;
+    this.details_sanitized = options.details_sanitized;
+    this.reason = options.reason;
+  }
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function stringList(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const items = value.filter((item): item is string => typeof item === "string");
+  return items.length ? items : undefined;
 }
 
 function endpoint(path: string): string {
@@ -30,7 +65,14 @@ async function parseResponse<T>(response: Response): Promise<T> {
     const sanitized = sanitizeRecord(payload);
     const record = isRecord(sanitized) ? sanitized : {};
     const message = typeof record.message === "string" ? record.message : `请求失败，HTTP ${response.status}`;
-    throw new Error(message);
+    throw new ApiError(message, {
+      status: response.status,
+      payload: sanitized,
+      error_code: typeof record.error_code === "string" ? record.error_code : typeof record.error === "string" ? record.error : undefined,
+      blocking_reasons: stringList(record.blocking_reasons),
+      details_sanitized: isRecord(record.details_sanitized) ? record.details_sanitized : undefined,
+      reason: typeof record.reason === "string" ? record.reason : undefined
+    });
   }
   return sanitizeRecord(payload) as T;
 }

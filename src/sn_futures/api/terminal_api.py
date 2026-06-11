@@ -4,7 +4,10 @@ import json
 from typing import Any, Mapping
 
 from .json_utils import safe_json_dumps, sanitize_for_json
+from .public_terminal_contracts import PUBLIC_TERMINAL_API_ENDPOINTS, PUBLIC_TERMINAL_RESPONSE_SCHEMAS
 from .terminal_router import build_terminal_router
+from ..core.data_safety import assert_public_payload_real_or_blocked
+from ..public_terminal.schema import build_public_terminal_openapi
 from ..data_providers.newsapi_provider import fetch_newsapi_status, test_newsapi_connection
 from ..runtime import get_user_output_dir
 from ..services.terminal_service import (
@@ -140,6 +143,18 @@ from ..services.provider_credentials_service import (
     refresh_provider_credentials_report,
 )
 from ..services.provider_smoke_test_service import get_latest_provider_smoke_report, run_provider_smoke_test
+from ..services.provider_only_smoke_harness import run_provider_only_smoke
+from ..public_terminal.provider_smoke_result_bridge_service import bridge_provider_smoke_result
+from ..public_terminal.event_service import build_public_event_center
+from ..public_terminal.market_service import build_public_market
+from ..public_terminal.readiness_service import build_public_terminal_readiness
+from ..public_terminal.report_service import build_public_report
+from ..public_terminal.refresh_orchestrator import (
+    cancel_public_refresh_task,
+    get_public_refresh_task,
+    start_public_refresh_data_status_task,
+)
+from ..prediction_core.realtime_loop import build_public_prediction_status_payload
 from ..services.managed_proxy_operator_runbook_service import (
     get_operator_onboarding_runbook,
     refresh_operator_onboarding_runbook,
@@ -368,6 +383,9 @@ TERMINAL_API_DOCS = {
         {"method": "POST", "path": "/api/terminal/settings/reset", "description": "重置本机密钥，不删除其他用户数据。"},
     ],
 }
+TERMINAL_API_DOCS["response_schemas"] = dict(PUBLIC_TERMINAL_RESPONSE_SCHEMAS)
+TERMINAL_API_DOCS["endpoints"].extend(PUBLIC_TERMINAL_API_ENDPOINTS)
+TERMINAL_API_DOCS["public_terminal"] = build_public_terminal_openapi()
 TERMINAL_API_DOCS["endpoints"].extend(
     [
         {"method": "POST", "path": "/api/terminal/refresh/fundamentals", "description": "刷新期限结构、基差、库存和仓单底层数据；没有真实源时只返回缺失说明。"},
@@ -1429,6 +1447,10 @@ def _ok(payload: Any) -> tuple[int, dict[str, Any]]:
     return 200, sanitize_for_json(payload)
 
 
+def _public_ok(payload: Any) -> tuple[int, dict[str, Any]]:
+    return _ok(assert_public_payload_real_or_blocked(payload if isinstance(payload, Mapping) else {}))
+
+
 def _task_response(kind: str, fn: Any, payload: dict[str, Any] | None = None) -> tuple[int, dict[str, Any]]:
     return _ok(start_task(kind, fn, payload=payload or {}))
 
@@ -1453,6 +1475,61 @@ def _terminal_router():
     return _TERMINAL_ROUTER
 
 
+def _handle_public_terminal_api(
+    path: str,
+    method: str,
+    query: Mapping[str, list[str]] | None = None,
+    body: Any = None,
+) -> tuple[int, dict[str, Any]]:
+    if method == "GET" and path == "/api/public-terminal/openapi.json":
+        return _ok(build_public_terminal_openapi())
+
+    if method == "GET" and path == "/api/public-terminal/readiness":
+        return _public_ok(build_public_terminal_readiness())
+
+    if method == "GET" and path == "/api/public-terminal/prediction-status":
+        return _public_ok(build_public_prediction_status_payload())
+
+    if method == "GET" and path == "/api/public-terminal/market":
+        return _public_ok(build_public_market())
+
+    if method == "GET" and path == "/api/public-terminal/events":
+        return _public_ok(build_public_event_center())
+
+    if method == "GET" and path == "/api/public-terminal/report":
+        return _public_ok(build_public_report())
+
+    if method == "POST" and path in {"/api/public-terminal/provider-smoke", "/api/public-terminal/provider-smoke-real"}:
+        payload, error = _parse_body(body)
+        if error is not None:
+            return 400, error
+        provider = str((payload or {}).get("provider") or "").strip().lower()
+        allow_remote = bool((payload or {}).get("allow_remote")) if path.endswith("provider-smoke-real") else False
+        smoke = run_provider_only_smoke(
+            providers=[provider] if provider else None,
+            allow_remote=allow_remote,
+            persist=False,
+        )
+        return _public_ok(bridge_provider_smoke_result(smoke, source="provider_only_harness"))
+
+    if method == "POST" and path == "/api/public-terminal/refresh-data-status":
+        return _public_ok(start_public_refresh_data_status_task())
+
+    task_prefix = "/api/public-terminal/tasks/"
+    if path.startswith(task_prefix):
+        task_id = path[len(task_prefix) :].strip("/")
+        if not task_id:
+            return 400, {"error": "missing_task_id", "reason": "missing_task_id"}
+        if task_id.endswith("/cancel"):
+            task_id = task_id[: -len("/cancel")].strip("/")
+            if method == "POST":
+                return _public_ok(cancel_public_refresh_task(task_id))
+        elif method == "GET" and "/" not in task_id:
+            return _public_ok(get_public_refresh_task(task_id))
+
+    return 404, {"error": "not_found", "message": "Public Terminal API path not found."}
+
+
 def handle_terminal_api(
     path: str,
     method: str = "GET",
@@ -1460,6 +1537,8 @@ def handle_terminal_api(
     body: Any = None,
 ) -> tuple[int, dict[str, Any]]:
     method = method.upper()
+    if path.startswith("/api/public-terminal/"):
+        return _handle_public_terminal_api(path, method, query, body)
     if not path.startswith("/api/terminal/"):
         return 404, {"error": "not_found", "message": "不是 terminal API 路径。"}
 
@@ -1850,7 +1929,9 @@ def handle_terminal_api(
             payload, error = _parse_body(body)
             if error is not None:
                 return 400, error
-            return _ok(test_provider(str((payload or {}).get("provider") or "")))
+            result = test_provider(str((payload or {}).get("provider") or ""))
+            bridge_provider_smoke_result(result, source="legacy_provider_test")
+            return _ok(result)
         if path == "/api/terminal/newsapi/test":
             return _ok(test_newsapi_connection())
         if path == "/api/terminal/system/shutdown":
@@ -1908,6 +1989,7 @@ def handle_terminal_api(
             provider = str((payload or {}).get("provider") or (payload or {}).get("provider_id") or "twelvedata")
             clear_api_response_cache("terminal:")
             smoke = run_provider_smoke_test(provider)
+            bridge_provider_smoke_result(smoke, source="local_api_provider_smoke")
             record_setup_action_result(
                 "run_provider_smoke",
                 status="success" if smoke.get("status") in {"pass", "research_only"} else "blocked",

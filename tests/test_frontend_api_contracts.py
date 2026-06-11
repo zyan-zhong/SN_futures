@@ -21,7 +21,7 @@ def _terminal_docs_paths() -> set[str]:
     return {
         str(item.get("path"))
         for item in payload.get("endpoints", [])
-        if isinstance(item, dict) and item.get("path")
+        if isinstance(item, dict) and str(item.get("path", "")).startswith("/api/terminal/")
     }
 
 
@@ -106,7 +106,8 @@ def test_terminal_docs_schema_and_manifest_are_stable() -> None:
     for item in endpoints:
         assert isinstance(item, dict)
         assert item.get("method") in {"GET", "POST"}
-        assert str(item.get("path", "")).startswith("/api/terminal/")
+        path = str(item.get("path", ""))
+        assert path.startswith("/api/terminal/") or path.startswith("/api/public-terminal/")
         assert item.get("description")
         key = (str(item["method"]), str(item["path"]))
         assert key not in seen, key

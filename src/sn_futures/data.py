@@ -9,6 +9,7 @@ from urllib.request import Request, urlopen
 import numpy as np
 import pandas as pd
 
+from .core.data_safety import mark_fixture_manifest
 from .runtime import get_user_data_dir
 
 
@@ -61,6 +62,7 @@ REQUIRED_COLUMNS = [
     "arb_fund_flow",
     "holiday_gap_flag",
 ]
+EXPLICIT_FIXTURE_MODE_ONLY = True
 
 CORE_REQUIRED_COLUMNS = [
     "date",
@@ -470,7 +472,7 @@ def build_demo_dataset(n_days: int = 420, seed: int = 42) -> pd.DataFrame:
     arb_fund_flow = 60 * supply_tightness - 40 * macro_pressure + 25 * lme_return * 100 + rng.normal(0, 8, n_days)
     holiday_gap_flag = ((dates.dayofweek == 0) | (dates.dayofweek == 4)).astype(int)
 
-    return pd.DataFrame(
+    frame = pd.DataFrame(
         {
             "date": dates,
             "open": open_,
@@ -521,6 +523,8 @@ def build_demo_dataset(n_days: int = 420, seed: int = 42) -> pd.DataFrame:
             "holiday_gap_flag": holiday_gap_flag,
         }
     )
+    frame.attrs.update(mark_fixture_manifest({"source": "build_demo_dataset", "demo_data_used": True}))
+    return frame
 
 
 def validate_columns(df: pd.DataFrame) -> None:

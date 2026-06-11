@@ -10,6 +10,7 @@ import numpy as np
 import pandas as pd
 
 from ..api.json_utils import sanitize_for_json
+from ..core.data_safety import DataSafetyViolation, assert_manifest_allowed_for_pipeline
 from ..runtime import get_user_output_dir
 from .feature_store_service import _feature_store_manifest_path
 from .managed_data_proxy_service import MANAGED_REQUIRED_RESEARCH_FIELDS
@@ -166,6 +167,10 @@ def validate_training_dataset_v12_readiness() -> dict[str, Any]:
         feature_store_status = str(manifest.get("status") or "missing")
         feature_store_path = str(manifest.get("feature_store_path") or "")
         managed_coverage = _manifest_managed_coverage(manifest)
+        try:
+            assert_manifest_allowed_for_pipeline(manifest, pipeline="training")
+        except DataSafetyViolation as exc:
+            blocked.extend(exc.blocking_reasons)
         if feature_store_status.lower() not in {"ready", "success"}:
             blocked.append("feature_store_v12_blocked")
             blocked.extend(str(item) for item in (manifest.get("blocking_reasons") or []) if item)

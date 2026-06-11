@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 from ..api.json_utils import sanitize_for_json
+from ..core.data_safety import mark_fixture_manifest
 from ..runtime import get_user_output_dir
 from ..utils.secret_sanitizer import contains_secret_like_value
 from .managed_data_audit_service import validate_managed_point_in_time_rows
@@ -79,7 +80,7 @@ def _secret_like_key_or_value(payload: Any) -> bool:
 
 
 def _base_payload(*, fixture_path: Path | None = None) -> dict[str, Any]:
-    return {
+    return mark_fixture_manifest({
         "status": "blocked",
         "generated_at": _now(),
         "fixture_version": FIXTURE_VERSION,
@@ -100,7 +101,7 @@ def _base_payload(*, fixture_path: Path | None = None) -> dict[str, Any]:
         "active_updated": False,
         "customer_prediction_generated": False,
         "report_path": str(_report_path()),
-    }
+    })
 
 
 def validate_sample_fixture_file(fixture_path: str | Path | None = None) -> dict[str, Any]:

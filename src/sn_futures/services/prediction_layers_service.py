@@ -5,6 +5,7 @@ import math
 from typing import Any, Mapping, MutableMapping
 
 from ..api.json_utils import sanitize_for_json
+from ..core.data_safety import DataSafetyViolation, assert_manifest_allowed_for_pipeline
 
 
 SCHEMA_VERSION = 1
@@ -216,6 +217,19 @@ def attach_prediction_layers(
     data_gate: Mapping[str, Any] | None = None,
     calibration_profile: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
+    try:
+        assert_manifest_allowed_for_pipeline(payload, pipeline="prediction")
+    except DataSafetyViolation as exc:
+        watermark = payload.get("data_watermark") if isinstance(payload.get("data_watermark"), Mapping) else {}
+        return build_blocked_prediction_payload(
+            blocking_reasons=exc.blocking_reasons,
+            data_gate={
+                "allowed": False,
+                "blocking_reasons": exc.blocking_reasons,
+                "gate": "no_demo_pipeline_firewall",
+            },
+            data_watermark=watermark,
+        )
     out = capture_raw_prediction_layers(payload)
     cards = out.get("cards") if isinstance(out.get("cards"), Mapping) else {}
     for horizon, card in cards.items():

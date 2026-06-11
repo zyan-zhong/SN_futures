@@ -9,6 +9,11 @@ import numpy as np
 import pandas as pd
 
 from ..api.json_utils import sanitize_for_json
+from ..core.data_safety import (
+    DataSafetyViolation,
+    assert_manifest_allowed_for_pipeline,
+    blocked_manifest_from_violation,
+)
 from ..features_core.pipeline import build_feature_matrix
 from ..labels.leakage_guard import check_feature_label_leakage, infer_label_columns
 from ..runtime import get_user_output_dir
@@ -355,6 +360,26 @@ def build_feature_store(version: str = "v3") -> dict[str, Any]:
     provenance = build_runtime_provenance_report(output_dir)
     gates = provenance.get("gates") if isinstance(provenance.get("gates"), Mapping) else {}
     gate = gates.get("feature_store") if isinstance(gates.get("feature_store"), Mapping) else {}
+    try:
+        assert_manifest_allowed_for_pipeline(provenance if isinstance(provenance, Mapping) else {}, pipeline="feature_store")
+    except DataSafetyViolation as exc:
+        payload = blocked_manifest_from_violation(
+            exc,
+            extra={
+                "version": version,
+                "feature_store_path": str(_feature_store_csv_path(version)),
+                "manifest_path": str(manifest_path),
+                "row_count": 0,
+                "leakage_check_pass": False,
+                "provenance_gate": gate,
+                "provenance_records": provenance.get("records", []) if isinstance(provenance, Mapping) else [],
+                "blocking_reasons": gate.get("blocking_reasons", []) if isinstance(gate, Mapping) else [],
+                "message_zh": "Feature Store blocked by no-demo data safety firewall.",
+            },
+        )
+        manifest_path.parent.mkdir(parents=True, exist_ok=True)
+        manifest_path.write_text(json.dumps(sanitize_for_json(payload), ensure_ascii=False, indent=2), encoding="utf-8")
+        return sanitize_for_json(payload)
     if not gate.get("allowed"):
         payload = {
             "version": version,
@@ -542,6 +567,19 @@ def load_feature_store(version: str = "v3") -> tuple[pd.DataFrame, dict[str, Any
     path = _feature_store_csv_path(version)
     if not manifest or not path.exists():
         manifest = build_feature_store(version)
+    try:
+        assert_manifest_allowed_for_pipeline(manifest if isinstance(manifest, Mapping) else {}, pipeline="training")
+    except DataSafetyViolation as exc:
+        blocked = blocked_manifest_from_violation(
+            exc,
+            extra={
+                "version": version,
+                "feature_store_path": str(_feature_store_csv_path(version)),
+                "manifest_path": str(_feature_store_manifest_path(version)),
+                "row_count": 0,
+            },
+        )
+        return pd.DataFrame(), sanitize_for_json(blocked)
     path = Path(str((manifest or {}).get("feature_store_path") or _feature_store_csv_path(version)))
     if not path.exists():
         return pd.DataFrame(), dict(manifest or {})

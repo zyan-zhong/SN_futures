@@ -7,6 +7,19 @@ from typing import Any, Mapping
 
 SAMPLE_MESSAGE_ZH = "这是样例数据，仅用于演示界面结构，不代表真实行情或预测。"
 SAMPLE_BANNER_ZH = "当前为样例数据模式，请点击一键刷新数据获取真实数据。"
+EXPLICIT_FIXTURE_MODE_ONLY = True
+
+
+def _fixture_flags() -> dict[str, bool]:
+    return {
+        "fixture": True,
+        "fixture_only": True,
+        "allowed_for_public": False,
+        "allowed_for_feature_store": False,
+        "allowed_for_training": False,
+        "allowed_for_prediction": False,
+        "allowed_for_backtest": False,
+    }
 
 
 def _candidate_roots() -> list[Path]:
@@ -64,6 +77,7 @@ def sample_predictions() -> list[dict[str, Any]]:
         item["stop_loss"] = None
         item["take_profit"] = None
         item["trade_point_note"] = "暂无交易点位"
+        item.update(_fixture_flags())
         out.append(item)
     return out
 
@@ -81,6 +95,7 @@ def sample_price_history() -> dict[str, Any]:
         "source": "sample_data",
         "data_quality_score": 0.0,
         "points": points if isinstance(points, list) else [],
+        **_fixture_flags(),
         "disclaimer": "仅供沪锡期货量化投研参考，不构成投资建议，不承诺收益，不接实盘交易。",
     }
 
@@ -88,7 +103,7 @@ def sample_price_history() -> dict[str, Any]:
 def sample_forecast_path() -> dict[str, Any]:
     payload = read_sample_json("sample_predictions.json")
     rows = payload.get("forecast_points", [])
-    points = [dict(row, sample=True) for row in rows if isinstance(row, Mapping)] if isinstance(rows, list) else []
+    points = [dict(row, sample=True, **_fixture_flags()) for row in rows if isinstance(row, Mapping)] if isinstance(rows, list) else []
     return {
         "sample": True,
         "sample_mode": True,
@@ -96,6 +111,7 @@ def sample_forecast_path() -> dict[str, Any]:
         "horizons": sorted({str(row.get("horizon")) for row in points if row.get("horizon")}),
         "points": points,
         "message_zh": SAMPLE_MESSAGE_ZH,
+        **_fixture_flags(),
         "disclaimer": "仅供沪锡期货量化投研参考，不构成投资建议，不承诺收益，不接实盘交易。",
     }
 
@@ -108,8 +124,9 @@ def sample_news_events() -> dict[str, Any]:
         "sample_mode": True,
         "sample_banner_zh": SAMPLE_BANNER_ZH,
         "events": events if isinstance(events, list) else [],
-        "provider_status": {"name": "sample_data", "success": True, "sample": True},
+        "provider_status": {"name": "sample_data", "success": True, "sample": True, **_fixture_flags()},
         "message_zh": SAMPLE_MESSAGE_ZH,
+        **_fixture_flags(),
         "disclaimer": "仅供沪锡期货量化投研参考，不构成投资建议，不承诺收益，不接实盘交易。",
     }
 
@@ -128,5 +145,6 @@ def sample_report_full(report_type: str = "daily") -> dict[str, Any]:
         "data_cutoff": "样例数据，无真实截止时间",
         "markdown": markdown,
         "message_zh": SAMPLE_MESSAGE_ZH,
+        **_fixture_flags(),
         "disclaimer": "仅供沪锡期货量化投研参考，不构成投资建议，不承诺收益，不接实盘交易。",
     }

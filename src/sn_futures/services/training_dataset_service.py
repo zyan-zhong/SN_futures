@@ -10,6 +10,7 @@ import numpy as np
 import pandas as pd
 
 from ..api.json_utils import sanitize_for_json
+from ..core.data_safety import PIPELINE_FIREWALL_ERROR_CODE
 from ..features_core.pipeline import build_feature_matrix
 from ..labels.forward_return import add_forward_return_labels, forward_label_columns
 from ..labels.horizons import INTRADAY_HORIZONS, LABEL_VERSION, LabelSpec, build_intraday_label_gate, label_spec_to_dict, normalise_label_specs
@@ -259,6 +260,33 @@ def _build_training_dataset_from_feature_store(
 ) -> dict[str, Any]:
     out = _output_dir()
     frame, feature_store_manifest = load_feature_store(feature_store_version)
+    if feature_store_manifest.get("error_code") == PIPELINE_FIREWALL_ERROR_CODE:
+        manifest = {
+            "generated_at": datetime.now().isoformat(timespec="seconds"),
+            "dataset_version": dataset_version,
+            "feature_store_version": feature_store_version,
+            "feature_set": feature_set,
+            "status": "blocked",
+            "error_code": PIPELINE_FIREWALL_ERROR_CODE,
+            "message_zh": "Training dataset blocked by no-demo data safety firewall.",
+            "manifest_path": str(_manifest_path(dataset_version)),
+            "blocked_reasons": list(feature_store_manifest.get("blocking_reasons") or ["no_demo_pipeline_firewall"]),
+            "dataset_paths": {},
+            "dataset_outputs": {},
+            "sample_data_used": False,
+            "mock_data_used": False,
+            "fake_data_used": False,
+            "baseline_used": False,
+            "fixture": False,
+            "allowed_for_training": False,
+            "allowed_for_prediction": False,
+            "allowed_for_backtest": False,
+            "customer_prediction_generated": False,
+            "active_model_written": False,
+        }
+        payload = sanitize_for_json(manifest)
+        _manifest_path(dataset_version).write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        return payload
     if frame.empty or "close" not in frame.columns:
         if str(feature_store_version).lower() == "v7":
             from .feature_store_v7_service import build_feature_store_v7

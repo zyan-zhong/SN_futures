@@ -11,6 +11,7 @@ import pandas as pd
 
 from ..api.json_utils import sanitize_for_json
 from ..backtest_core import BacktestConfig, CostConfig, run_futures_backtest
+from ..core.data_safety import DataSafetyViolation, assert_manifest_allowed_for_pipeline
 from ..runtime import get_user_output_dir
 
 
@@ -93,6 +94,16 @@ def _manifest_flag(payload: Any, key: str) -> bool:
     return False
 
 
+def _append_data_safety_reasons(blocked_reasons: list[str], manifests: Mapping[str, Any]) -> None:
+    for manifest_name, manifest in manifests.items():
+        if not isinstance(manifest, Mapping):
+            continue
+        try:
+            assert_manifest_allowed_for_pipeline(manifest, pipeline="backtest")
+        except DataSafetyViolation as exc:
+            blocked_reasons.extend(f"{manifest_name}:{reason}" for reason in exc.blocking_reasons)
+
+
 def _input_blocking_reasons(input_path: Path) -> tuple[list[str], Any, Any, Any]:
     bars_path = input_path / "immutable_historical_bars.csv"
     data_manifest_path = input_path / "historical_bars_manifest.json"
@@ -117,6 +128,14 @@ def _input_blocking_reasons(input_path: Path) -> tuple[list[str], Any, Any, Any]
         blocked_reasons.append("contract_metadata_missing")
     if feature_manifest is None:
         blocked_reasons.append("point_in_time_feature_manifest_missing")
+    _append_data_safety_reasons(
+        blocked_reasons,
+        {
+            "historical_bars": data_manifest,
+            "signals": signal_manifest,
+            "point_in_time_features": feature_manifest,
+        },
+    )
     if data_manifest is not None and not _manifest_flag(data_manifest, "history_immutable"):
         blocked_reasons.append("historical_bars_not_marked_immutable")
     if data_manifest is not None and data_manifest.get("allowed_for_backtest") is False:
@@ -451,6 +470,14 @@ def run_auditable_research_backtest(
         blocked_reasons.append("contract_metadata_missing")
     if feature_manifest is None:
         blocked_reasons.append("point_in_time_feature_manifest_missing")
+    _append_data_safety_reasons(
+        blocked_reasons,
+        {
+            "historical_bars": data_manifest,
+            "signals": signal_manifest,
+            "point_in_time_features": feature_manifest,
+        },
+    )
     if data_manifest is not None and not _manifest_flag(data_manifest, "history_immutable"):
         blocked_reasons.append("historical_bars_not_marked_immutable")
     if data_manifest is not None and data_manifest.get("allowed_for_backtest") is False:

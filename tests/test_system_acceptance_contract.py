@@ -32,6 +32,8 @@ REQUIRED_FEATURES = {
     "no_demo_fake",
     "no_raw_secrets",
     "no_buy_sell_advice",
+    "resources_model_governance_dev_only",
+    "realtime_prediction_dry_run",
 }
 FORBIDDEN_AMBIGUOUS_TERMS = {
     "tbd",
@@ -72,6 +74,8 @@ def _parse_markdown_table(path: Path) -> list[dict[str, str]]:
 
 
 def test_system_acceptance_matrix_covers_every_required_feature_without_ambiguity() -> None:
+    source = MATRIX_PATH.read_text(encoding="utf-8")
+    assert "Full System Acceptance Matrix v2" in source
     rows = _parse_markdown_table(MATRIX_PATH)
     by_feature = {row["feature_id"]: row for row in rows}
 
@@ -141,6 +145,10 @@ def test_public_terminal_runtime_payloads_are_blocked_or_usable_with_reason() ->
         for forbidden in PUBLIC_SAFETY_FORBIDDEN:
             assert forbidden not in serialized, (path, forbidden)
         status_text = str(payload.get("status") or payload.get("prediction_status", {}).get("status") or "").lower()
+        if path == "/api/public-terminal/prediction-status":
+            dry_run_status = str(payload.get("prediction_status", {}).get("dry_run_status") or "").lower()
+            assert dry_run_status in {"blocked", "skipped", "ready_to_predict", "resource_busy", "stale_data"}
+            assert payload["prediction_status"]["dry_run"] is True
         if status_text in {"blocked", "failed", "stale", "skipped"}:
             assert "reason" in serialized or "blocking_reasons" in serialized, path
 

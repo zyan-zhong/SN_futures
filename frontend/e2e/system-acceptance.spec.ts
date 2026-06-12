@@ -8,10 +8,11 @@ const MASKED_SECRET = "ac****cret";
 type AcceptanceState = {
   settingsConfigured: boolean;
   refreshPolls: number;
+  predictionReady: boolean;
 };
 
 function createState(): AcceptanceState {
-  return { settingsConfigured: false, refreshPolls: 0 };
+  return { settingsConfigured: false, refreshPolls: 0, predictionReady: false };
 }
 
 async function json(route: Route, body: unknown, status = 200) {
@@ -22,10 +23,12 @@ function predictionStatusPayload(canPredict = false) {
   return {
     prediction_status: {
       status: canPredict ? "ready_to_predict" : "blocked",
+      dry_run_status: canPredict ? "ready_to_predict" : "blocked",
       dry_run: true,
       can_predict: canPredict,
       reason: canPredict ? "" : "active_model_missing",
       blocking_reasons: canPredict ? [] : ["active_model_missing"],
+      missing_evidence: canPredict ? [] : ["active_model"],
       training_invoked: false,
       prediction_generated: false,
       backtest_invoked: false,
@@ -80,7 +83,7 @@ async function installAcceptanceMocks(page: Page, state: AcceptanceState) {
         backtest_invoked: false
       });
     }
-    if (path === "/api/public-terminal/prediction-status") return json(route, predictionStatusPayload(false));
+    if (path === "/api/public-terminal/prediction-status") return json(route, predictionStatusPayload(state.predictionReady));
     if (path === "/api/public-terminal/settings/status") {
       return json(route, {
         configured: state.settingsConfigured,
@@ -303,6 +306,21 @@ test("system acceptance matrix public journey has no ambiguous states", async ({
   const copied = await page.evaluate(() => window.localStorage.getItem("acceptanceDiagnostics") || "");
   expect(copied).toContain("readiness");
   expect(copied).not.toContain(RAW_SECRET);
+
+  // resources_model_governance_dev_only
+  for (const forbidden of ["Model Governance", "Resource Manager", "Active Release"]) {
+    await expect(page.getByText(forbidden)).toHaveCount(0);
+  }
+
+  // realtime_prediction_dry_run
+  await page.getByRole("button", { name: /^Home/i }).click();
+  await expect(page.locator(".prediction-status-panel")).toContainText(/暂不能预测|鏆備笉鑳介娴?/);
+  state.predictionReady = true;
+  await page.getByRole("button", { name: /^Market/i }).click();
+  await page.getByRole("button", { name: /^Home/i }).click();
+  await expect(page.locator(".prediction-status-panel")).toContainText(/证据就绪|璇佹嵁灏辩华/);
+  await expect(page.locator(".prediction-card")).toHaveCount(0);
+  await assertSafePublicSurface(page);
 
   // dev_mode_hidden, no_demo_fake, no_raw_secrets, no_buy_sell_advice
   for (const forbidden of ["Candidate Research", "Governance Console", "Training Data", "Feature Store", "Managed Proxy"]) {

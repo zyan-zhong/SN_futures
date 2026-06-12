@@ -1,6 +1,6 @@
-# System Acceptance Matrix
+# Full System Acceptance Matrix v2
 
-This matrix freezes the current Public Terminal acceptance state. Every row must be one of:
+This matrix freezes the current Public Terminal acceptance state for the unified framework. Every row must be one of:
 
 - `usable`: the customer can complete the workflow with real or mocked contract data.
 - `blocked_with_reason`: the workflow is visible and intentionally blocked with a clear user-facing reason.
@@ -26,3 +26,5 @@ Public Terminal must not train, generate prediction values, run research backtes
 | no_demo_fake | No demo or fake output | blocked_with_reason | safety | Public payloads and research pipelines block demo, fake, sample, and baseline artifacts. | Data safety firewall blocks dirty payloads and fixture manifests from public/training/prediction/backtest. | tests/test_no_demo_public_firewall.py; frontend/e2e/system-acceptance.spec.ts |
 | no_raw_secrets | No raw secret exposure | blocked_with_reason | safety | User sees masked key status only and copied diagnostics exclude raw tokens. | OpenAPI schema and frontend types reject raw secret field names. | tests/test_public_terminal_openapi_contract.py; tests/test_frontend_public_terminal_api_contracts.py; frontend/e2e/system-acceptance.spec.ts |
 | no_buy_sell_advice | No trade advice | blocked_with_reason | safety | Public UI does not show actionable trade advice, price targets, or direction recommendations. | Public reports are research-only and prediction values are forbidden. | tests/test_system_acceptance_contract.py; tests/test_realtime_prediction_loop_contract.py; frontend/e2e/system-acceptance.spec.ts |
+| resources_model_governance_dev_only | Resources and model governance | dev_only | dev-only | Public users cannot start training, promotion, model registry writes, resource scheduling, or active release publishing. | Model governance and resource manager skeletons require explicit dev mode and keep Public Terminal read-only. | tests/test_model_governance_resource_contract.py; tests/test_model_training_resource_governance_contract.py; frontend/e2e/system-acceptance.spec.ts |
+| realtime_prediction_dry_run | Realtime prediction dry-run | usable | public | User sees dry-run status such as blocked, skipped, resource busy, stale data, or ready to predict without any prediction values. | Public prediction-status endpoint reports status only and persists loop state without generating direction, price, or probability. | tests/test_realtime_prediction_loop_contract.py; frontend/e2e/system-acceptance.spec.ts |

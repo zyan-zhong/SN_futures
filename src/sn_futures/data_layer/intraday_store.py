@@ -125,3 +125,22 @@ class IntradayStore:
         path = self.root / "bars" / safe_part(symbol.upper(), "SN") / f"{safe_part(clean_interval, 'intraday')}.json"
         atomic_write_json(path, payload)
         return safe_payload(payload)
+
+    def load_latest_intraday_bars(self, *, symbol: str = "SN") -> dict[str, Any]:
+        candidates: list[dict[str, Any]] = []
+        for path in (self.root / "bars" / safe_part(symbol.upper(), "SN")).glob("*.json"):
+            payload = read_json(path, {})
+            if isinstance(payload, Mapping):
+                candidates.append(dict(payload))
+        if not candidates:
+            return {}
+        return safe_payload(
+            max(
+                candidates,
+                key=lambda payload: str(
+                    (payload.get("manifest") if isinstance(payload.get("manifest"), Mapping) else {}).get("source_published_at")
+                    or (payload.get("manifest") if isinstance(payload.get("manifest"), Mapping) else {}).get("fetched_at")
+                    or ""
+                ),
+            )
+        )

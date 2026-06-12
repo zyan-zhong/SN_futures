@@ -58,7 +58,7 @@ def _normalize_record(record: Mapping[str, Any]) -> dict[str, Any]:
         "fake_data_used": False,
         "demo_data_used": False,
         "latest_quote_display_only": bool(record.get("latest_quote_display_only")),
-        "allowed_for_display": status == "ready",
+        "allowed_for_display": status in {"ready", "stale"},
         "blocking_reasons": sorted(set(blocking_reasons)),
     }
     allowed = _allowed_downstream(payload, status)

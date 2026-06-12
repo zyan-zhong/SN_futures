@@ -60,7 +60,13 @@ def _write_csv(path: Path, rows: list[dict[str, Any]]) -> Path:
     return path
 
 
-def _prepare_ready_prediction_inputs(root: Path, *, stale: bool = False, active_release: bool = True) -> dict[str, str]:
+def _prepare_ready_prediction_inputs(
+    root: Path,
+    *,
+    stale: bool = False,
+    active_release: bool = True,
+    horizon: str = "tomorrow",
+) -> dict[str, str]:
     out = _outputs(root)
     feature_path = _write_csv(
         out / "feature_store" / "v3" / "feature_store.csv",
@@ -96,12 +102,12 @@ def _prepare_ready_prediction_inputs(root: Path, *, stale: bool = False, active_
     feature_data_hash = _sha256(feature_path)
 
     dataset_path = _write_csv(
-        out / "training_datasets" / "v3" / "train_tomorrow.csv",
+        out / "training_datasets" / "v3" / f"train_{horizon}.csv",
         [
             {
                 "feature_time": f"2026-02-{(idx % 28) + 1:02d}",
                 "label_available_at": f"2026-03-{(idx % 28) + 1:02d}",
-                "horizon": "tomorrow",
+                "horizon": horizon,
                 "ma_5": 199_900 + idx,
                 "rsi_14": 45 + idx % 10,
                 "target_return": 0.001 if idx % 2 == 0 else -0.001,
@@ -117,10 +123,10 @@ def _prepare_ready_prediction_inputs(root: Path, *, stale: bool = False, active_
             "feature_store_version": "v3",
             "label_version": "label_v1_multi_horizon_pit",
             "status": "success",
-            "horizons": ["tomorrow"],
+            "horizons": [horizon],
             "label_specs": {
-                "tomorrow": {
-                    "horizon": "tomorrow",
+                horizon: {
+                    "horizon": horizon,
                     "target_return": "target_return",
                     "direction_label": "direction_label",
                     "label_available_at": "label_available_at",
@@ -132,11 +138,11 @@ def _prepare_ready_prediction_inputs(root: Path, *, stale: bool = False, active_
             "sample_data_used": False,
             "fake_data_used": False,
             "baseline_used": False,
-            "sample_count_by_horizon": {"tomorrow": 60},
-            "class_distribution": {"tomorrow": {"1": 30, "-1": 30}},
+            "sample_count_by_horizon": {horizon: 60},
+            "class_distribution": {horizon: {"1": 30, "-1": 30}},
             "data_source_hash": feature_data_hash,
-            "dataset_paths": {"tomorrow": str(dataset_path)},
-            "dataset_outputs": {"tomorrow": {"path": str(dataset_path), "sample_count": 60, "format": "csv"}},
+            "dataset_paths": {horizon: str(dataset_path)},
+            "dataset_outputs": {horizon: {"path": str(dataset_path), "sample_count": 60, "format": "csv"}},
             "no_model_training": True,
             "customer_prediction_generated": False,
         },
@@ -166,7 +172,7 @@ def _prepare_ready_prediction_inputs(root: Path, *, stale: bool = False, active_
                 "active_models": [
                     {
                         "model_id": "active-sn-v12",
-                        "horizon": "tomorrow",
+                        "horizon": horizon,
                         "status": "active",
                         "artifact_path": "model_artifacts/active-sn-v12.pkl",
                         "evidence": evidence,
@@ -227,6 +233,8 @@ def test_stale_data_blocks_realtime_dry_run_without_prediction(tmp_path: Path, m
     payload = run_realtime_prediction_dry_run(output_dir=out, now="2026-06-11T09:30:00+08:00")
 
     assert payload["status"] == "blocked"
+    assert payload["dry_run_status"] == "stale_data"
+    assert payload["reason"] == "stale_data"
     assert payload["can_predict"] is False
     assert "data_watermark_stale" in payload["blocking_reasons"]
     _assert_no_prediction_values(payload)
@@ -244,8 +252,27 @@ def test_resource_busy_skips_realtime_dry_run_without_prediction(tmp_path: Path,
     )
 
     assert payload["status"] == "skipped"
+    assert payload["dry_run_status"] == "resource_busy"
     assert payload["reason"] == "resource_busy"
     assert "resource_busy" in payload["blocking_reasons"]
+    _assert_no_prediction_values(payload)
+
+
+def test_no_intraday_bars_blocks_short_horizon_realtime_dry_run(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("SN_DATA_DIR", str(tmp_path))
+    out = _outputs(tmp_path)
+    _prepare_ready_prediction_inputs(tmp_path, horizon="next_15m")
+
+    payload = run_realtime_prediction_dry_run(
+        output_dir=out,
+        now="2026-06-11T09:30:00+08:00",
+        horizons=("next_15m",),
+    )
+
+    assert payload["status"] == "blocked"
+    assert payload["dry_run_status"] == "blocked"
+    assert payload["can_predict"] is False
+    assert "next_15m:intraday_bars_missing" in payload["blocking_reasons"]
     _assert_no_prediction_values(payload)
 
 
@@ -348,6 +375,9 @@ def test_frontend_prediction_status_panel_uses_public_client_and_never_names_pre
     assert 'path: "/api/public-terminal/prediction-status"' in manifest_source
     assert "PredictionStatusPanel" in panel_source
     assert "PredictionStatusPanel" in terminal_source
+    assert "getPublicPredictionStatus" in panel_source
+    assert "getPublicReadiness" not in panel_source
+    assert "dry_run_status" in panel_source
     assert "fetch(" not in panel_source
     serialized = "\n".join([api_source, types_source, manifest_source, panel_source])
     leaked = sorted(key for key in FORBIDDEN_PREDICTION_OUTPUT_KEYS if key in serialized)

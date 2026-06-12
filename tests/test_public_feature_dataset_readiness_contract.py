@@ -293,8 +293,9 @@ def test_public_readiness_consumes_prediction_readiness_without_prediction_value
     status, payload = handle_terminal_api("/api/public-terminal/readiness", "GET", {}, None)
 
     assert status == 200
-    assert payload["prediction_readiness"]["status"] == "ready"
-    assert payload["prediction_readiness"]["ready_for_prediction"] is True
+    assert payload["prediction_readiness"]["status"] == "blocked"
+    assert payload["prediction_readiness"]["ready_for_prediction"] is False
+    assert "active_model_missing" in payload["prediction_readiness"]["blocking_reasons"]
     assert payload["prediction_generated"] is False
     serialized = json.dumps(payload, ensure_ascii=False).lower()
     assert "prediction_value" not in serialized

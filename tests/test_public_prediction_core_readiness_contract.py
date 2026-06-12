@@ -315,10 +315,11 @@ def test_valid_fixture_release_evidence_is_ready_without_generating_prediction(t
 
     payload = build_public_prediction_core_readiness(horizons=("tomorrow",))
 
-    assert payload["status"] == "ready"
+    assert payload["status"] == "ready_no_prediction_output"
     assert payload["can_predict"] is True
     assert payload["active_release_safe"] is True
     assert payload["missing_evidence"] == []
+    assert payload["prediction_output_available"] is False
     assert payload["sample_data_used"] is False
     assert payload["fake_data_used"] is False
     _assert_no_prediction_values(payload)
@@ -335,7 +336,8 @@ def test_public_readiness_contains_prediction_core_status_but_no_prediction_valu
     assert status == 200
     core = payload["prediction_core_readiness"]
     assert core["can_predict"] is True
-    assert core["status"] == "ready"
+    assert core["status"] == "ready_no_prediction_output"
+    assert core["prediction_output_available"] is False
     _assert_no_prediction_values(core)
     serialized = json.dumps(payload, ensure_ascii=False).lower()
     leaked = sorted(key for key in FORBIDDEN_PREDICTION_OUTPUT_KEYS if key in serialized)

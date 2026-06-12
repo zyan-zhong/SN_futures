@@ -103,6 +103,7 @@ def _base_payload(
     output_dir: Path,
     now_text: str,
     status: str,
+    dry_run_status: str | None = None,
     reason: str,
     blocking_reasons: list[str],
     readiness: Mapping[str, Any] | None = None,
@@ -114,6 +115,7 @@ def _base_payload(
     payload = {
         "schema_version": REALTIME_LOOP_SCHEMA_VERSION,
         "status": status,
+        "dry_run_status": dry_run_status or status,
         "dry_run": True,
         "can_predict": ready,
         "ready_to_generate_prediction": ready,
@@ -199,6 +201,7 @@ def run_realtime_prediction_dry_run(
             output_dir=out,
             now_text=now_text,
             status="skipped",
+            dry_run_status="resource_busy",
             reason="resource_busy",
             blocking_reasons=[str(reason) for reason in pool_gate.get("blocking_reasons") or ["resource_busy"]],
             latest_quote=latest_quote,
@@ -223,12 +226,14 @@ def run_realtime_prediction_dry_run(
 
     readiness = build_public_prediction_core_readiness(output_dir=out, horizons=horizons)
     reasons = [str(reason) for reason in readiness.get("blocking_reasons") or [] if str(reason)]
+    stale = any(reason in {"data_watermark_stale", "data_watermark_prediction_not_allowed"} for reason in reasons)
     status = "ready_to_predict" if readiness.get("can_predict") is True and not reasons else "blocked"
     payload = _base_payload(
         output_dir=out,
         now_text=now_text,
         status=status,
-        reason="" if status == "ready_to_predict" else (reasons[0] if reasons else "blocked"),
+        dry_run_status="stale_data" if stale else status,
+        reason="" if status == "ready_to_predict" else ("stale_data" if stale else (reasons[0] if reasons else "blocked")),
         blocking_reasons=reasons,
         readiness=readiness,
         latest_quote=latest_quote,

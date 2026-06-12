@@ -5,7 +5,6 @@ from typing import Any, Mapping
 
 from ..api.json_utils import sanitize_for_json
 from ..data_layer.watermark import WatermarkStore
-from ..prediction_core.data_readiness import build_prediction_data_readiness
 from ..prediction_core.readiness import build_public_prediction_core_readiness
 from ..utils.secret_sanitizer import sanitize_mapping
 from .provider_smoke_result_bridge_service import DOWNSTREAM_FLAGS, get_public_provider_smoke_report
@@ -42,8 +41,7 @@ def build_public_terminal_readiness() -> dict[str, Any]:
     passed = int(smoke_report.get("passed_count") or 0)
     smoke_passed = passed > 0
     blocking_reasons = [] if smoke_passed else list(smoke_report.get("blocking_reasons") or ["no_active_provider_smoke_pass"])
-    prediction_readiness = build_prediction_data_readiness()
-    prediction_core_readiness = build_public_prediction_core_readiness()
+    prediction_readiness = build_public_prediction_core_readiness()
     return _safe(
         {
             "status": "ready" if smoke_passed else "blocked",
@@ -62,7 +60,7 @@ def build_public_terminal_readiness() -> dict[str, Any]:
                 "report_path": smoke_report.get("report_path", ""),
             },
             "prediction_readiness": prediction_readiness,
-            "prediction_core_readiness": prediction_core_readiness,
+            "prediction_core_readiness": prediction_readiness,
             **{flag: False for flag in DOWNSTREAM_FLAGS},
         }
     )

@@ -5,10 +5,22 @@ type Indicators = NonNullable<NonNullable<PublicMarketPayload["market"]>["indica
 const INDICATOR_LABELS: Record<string, string> = {
   sma_5: "SMA 5",
   sma_20: "SMA 20",
+  ema_12: "EMA 12",
+  ema_26: "EMA 26",
   rsi_14: "RSI 14",
   macd: "MACD",
   macd_signal: "MACD Signal",
-  volatility_20: "Volatility 20"
+  atr_14: "ATR 14",
+  volatility_20: "Volatility 20",
+  volume_change_1: "Volume change",
+  open_interest_change_1: "Open interest change"
+};
+
+const INVENTORY_LABELS: Record<string, string> = {
+  warehouse_warrant_latest: "Warehouse warrant",
+  warehouse_warrant_change_1: "Warrant change",
+  inventory_latest: "Inventory",
+  inventory_change_1: "Inventory change"
 };
 
 function formatValue(value: unknown) {
@@ -21,6 +33,8 @@ function formatValue(value: unknown) {
 export function IndicatorPanel({ indicators }: { indicators: Indicators }) {
   const values = indicators.values || {};
   const entries = Object.entries(INDICATOR_LABELS).filter(([key]) => values[key] !== undefined);
+  const inventory = indicators.inventory_summary || {};
+  const inventoryEntries = Object.entries(INVENTORY_LABELS).filter(([key]) => inventory[key] !== undefined && inventory[key] !== null);
   if (indicators.status !== "ready") {
     return (
       <section className="section-card" data-testid="indicator-panel">
@@ -38,7 +52,7 @@ export function IndicatorPanel({ indicators }: { indicators: Indicators }) {
       <div className="section-card__header">
         <div>
           <h2>Indicators</h2>
-          <p>RSI / MACD / SMA / Volatility</p>
+          <p>MA / EMA / RSI / MACD / ATR / volume / inventory</p>
         </div>
       </div>
       <div className="market-indicator-grid">
@@ -46,6 +60,12 @@ export function IndicatorPanel({ indicators }: { indicators: Indicators }) {
           <div key={key}>
             <span className="metric-label">{label}</span>
             <strong>{formatValue(values[key])}</strong>
+          </div>
+        ))}
+        {inventoryEntries.map(([key, label]) => (
+          <div key={key}>
+            <span className="metric-label">{label}</span>
+            <strong>{formatValue(inventory[key])}</strong>
           </div>
         ))}
       </div>

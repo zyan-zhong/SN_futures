@@ -24,21 +24,43 @@ def build_public_report(output_dir: Path | None = None) -> dict[str, Any]:
     event_count = int(event_summary.get("total_count") or 0)
     eligible_event_count = int(event_summary.get("eligible_count") or 0)
 
-    market_ready = bool(daily.get("allowed_for_display") and int(daily.get("row_count") or 0) > 0)
+    daily_rows = int(daily.get("row_count") or 0)
+    daily_display_allowed = bool(daily.get("allowed_for_display") and daily_rows > 0)
+    daily_stale = daily_display_allowed and str(daily.get("stale_status") or "").lower() == "stale"
+    market_ready = daily_display_allowed and not daily_stale
     event_ready = eligible_event_count > 0
-    status = "ready" if market_ready else "blocked"
+    event_section = _safe(
+        {
+            "status": "ready" if event_count else "blocked",
+            "reason": "" if event_count else "missing_events",
+            "total_count": event_count,
+            "eligible_count": eligible_event_count,
+            "rejected_count": int(event_summary.get("rejected_count") or 0),
+            "categories": event_summary.get("categories") if isinstance(event_summary.get("categories"), Mapping) else {},
+            "regions": event_summary.get("regions") if isinstance(event_summary.get("regions"), Mapping) else {},
+            "languages": event_summary.get("languages") if isinstance(event_summary.get("languages"), Mapping) else {},
+            "latest_source_published_at": str(event_summary.get("latest_source_published_at") or ""),
+            "latest_fetched_at": str(event_summary.get("latest_fetched_at") or ""),
+            "investment_advice": False,
+            "used_for_customer_prediction": False,
+        }
+    )
+    status = "ready" if market_ready else ("stale" if daily_stale else "blocked")
+    reason = "" if market_ready else ("stale_daily_bars" if daily_stale else "missing_daily_bars")
+    market_data_coverage = "ready" if market_ready else ("stale" if daily_stale else "empty")
 
     return _safe(
         {
             "report": {
                 "status": status,
-                "reason": "" if market_ready else "missing_daily_bars",
+                "reason": reason,
                 "provider_status": watermark.get("status") or "blocked",
-                "market_data_coverage": "ready" if market_ready else "empty",
+                "market_data_coverage": market_data_coverage,
                 "event_coverage": "ready" if event_ready else "empty",
                 "event_count": event_count,
                 "timed_event_count": eligible_event_count,
                 "event_summary": event_summary,
+                "event_section": event_section,
                 "data_watermark": watermark,
                 "research_only": True,
                 "investment_advice": False,

@@ -205,3 +205,51 @@ def test_public_report_consumes_event_center_summary(tmp_path: Path, monkeypatch
     assert report["report"]["event_summary"]["eligible_count"] == 1
     assert report["report"]["event_summary"]["rejected_count"] == 1
     assert report["report"]["event_summary"]["categories"]["global_news"] == 2
+
+
+def test_all_public_event_categories_flow_into_report_event_section(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("SN_DATA_DIR", str(tmp_path))
+    events = [
+        ("China news: SHFE tin inventory update", "newsapi", "news_event", "china_news", "CN", "en"),
+        ("Global news: LME tin stock falls", "newsapi", "news_event", "global_news", "global", "en"),
+        ("China policy supports tin solder supply", "public_policy_rss", "policy_event", "china_policy", "CN", "zh"),
+        ("Global policy reviews Indonesia tin export quota", "newsapi", "policy_event", "global_policy", "global", "en"),
+        ("SHFE tin warehouse warrants announcement", "shfe_public", "exchange_public", "exchange_notice", "CN", "zh"),
+        ("Tin smelter maintenance affects supply chain", "akshare_news", "news_event", "supply_chain_event", "global", "en"),
+    ]
+    for index, (title, provider_id, data_kind, category, region, language) in enumerate(events):
+        _persist_event(
+            tmp_path,
+            title=title,
+            provider_id=provider_id,
+            data_kind=data_kind,
+            category=category,
+            region=region,
+            language=language,
+            source_published_at=f"2026-06-10T1{index}:00:00+08:00",
+            fetched_at=f"2026-06-11T09:1{index}:00+08:00",
+        )
+
+    event_payload = build_public_event_center()
+    report = build_public_report()
+
+    center = event_payload["event_center"]
+    for category in (
+        "china_news",
+        "global_news",
+        "china_policy",
+        "global_policy",
+        "exchange_notice",
+        "supply_chain_event",
+    ):
+        assert center["summary"]["categories"][category] == 1
+        assert report["report"]["event_section"]["categories"][category] == 1
+
+    assert report["report"]["event_section"]["status"] == "ready"
+    assert report["report"]["event_section"]["total_count"] == 6
+    assert report["report"]["event_section"]["eligible_count"] == 6
+    assert report["report"]["event_section"]["rejected_count"] == 0
+    assert report["report"]["event_section"]["investment_advice"] is False
+    assert report["prediction_generated"] is False
+    assert report["training_invoked"] is False
+    assert report["backtest_invoked"] is False

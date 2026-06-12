@@ -93,6 +93,7 @@ def _blocked_market(*, reason: str, watermark: Mapping[str, Any], reasons: list[
                 },
                 "inventory": {"warehouse_warrant": None, "inventory": None},
                 "latest_quote": None,
+                "intraday_status": _intraday_status(None),
                 "indicators": indicators,
                 "data_watermark": dict(watermark),
                 "data_watermark_panel": {
@@ -133,6 +134,58 @@ def _latest_quote(output_dir: Path | None = None) -> dict[str, Any]:
             "display_only": True,
             "latest_quote_display_only": True,
             "manifest": manifest,
+        }
+    )
+
+
+def _intraday_status(output_dir: Path | None = None) -> dict[str, Any]:
+    payload = IntradayStore(output_dir=output_dir).load_latest_intraday_bars(symbol="SN")
+    rows = payload.get("rows") if isinstance(payload.get("rows"), list) else []
+    manifest = payload.get("manifest") if isinstance(payload.get("manifest"), Mapping) else {}
+    if _dirty_payload({"rows": rows, "manifest": manifest}):
+        return _safe(
+            {
+                "status": "blocked",
+                "reason": "no_demo_public_firewall",
+                "interval": "",
+                "row_count": 0,
+                "latest_bar_time": "",
+                "display_allowed": False,
+                "prediction_allowed": False,
+                "latest_quote_used_as_intraday_bar": False,
+                "daily_bar_used_as_intraday": False,
+                "blocking_reasons": ["no_demo_public_firewall"],
+            }
+        )
+    if not rows:
+        return _safe(
+            {
+                "status": "blocked",
+                "reason": "missing_intraday_bars",
+                "interval": "",
+                "row_count": 0,
+                "latest_bar_time": "",
+                "display_allowed": False,
+                "prediction_allowed": False,
+                "latest_quote_used_as_intraday_bar": False,
+                "daily_bar_used_as_intraday": False,
+                "blocking_reasons": ["missing_intraday_bars"],
+            }
+        )
+    latest_bar = rows[-1] if isinstance(rows[-1], Mapping) else {}
+    return _safe(
+        {
+            "status": "ready",
+            "reason": "",
+            "interval": str(manifest.get("interval") or ""),
+            "row_count": len(rows),
+            "latest_bar_time": str(latest_bar.get("bar_end") or manifest.get("source_published_at") or ""),
+            "source_published_at": str(manifest.get("source_published_at") or latest_bar.get("bar_end") or ""),
+            "display_allowed": bool(manifest.get("allowed_for_display")),
+            "prediction_allowed": False,
+            "latest_quote_used_as_intraday_bar": False,
+            "daily_bar_used_as_intraday": False,
+            "blocking_reasons": [],
         }
     )
 
@@ -185,7 +238,8 @@ def build_public_market(output_dir: Path | None = None) -> dict[str, Any]:
     market_status = "stale" if stale else "ready"
     missing_reasons = ["stale_daily_bars"] if stale else []
     latest = _latest_quote(output_dir=output_dir)
-    indicators = build_market_indicators(chart)
+    intraday_status = _intraday_status(output_dir=output_dir)
+    indicators = build_market_indicators(chart, output_dir=output_dir)
     return _safe(
         {
             "market": {
@@ -196,6 +250,7 @@ def build_public_market(output_dir: Path | None = None) -> dict[str, Any]:
                 "watch_header": _watch_header(chart, latest, market_status),
                 "inventory": _inventory(chart),
                 "latest_quote": latest or None,
+                "intraday_status": intraday_status,
                 "indicators": indicators,
                 "manifest": manifest,
                 "data_watermark": watermark,

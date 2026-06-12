@@ -9,6 +9,7 @@ from typing import Any
 sys.path.insert(0, "src")
 
 from sn_futures.api.terminal_api import handle_terminal_api
+from sn_futures.data_layer.manifests import ManifestStore
 from sn_futures.data_layer.intraday_store import IntradayStore
 from sn_futures.data_layer.stores import NormalizedStore
 from sn_futures.data_layer.watermark import WatermarkStore
@@ -102,21 +103,84 @@ def test_valid_daily_bars_build_watch_board_kline_and_indicators(tmp_path: Path,
     assert market["watch_header"]["latest_price"] == 252300
     assert market["watch_header"]["latest_quote_display_only"] is True
     assert market["watch_header"]["daily_close"] == rows[-1]["close"]
+    assert market["intraday_status"]["status"] == "blocked"
+    assert market["intraday_status"]["reason"] == "missing_intraday_bars"
+    assert market["intraday_status"]["latest_quote_used_as_intraday_bar"] is False
     assert market["kline"]["bars"][-1]["close"] == rows[-1]["close"]
     assert market["kline"]["bars"][-1]["volume"] == rows[-1]["volume"]
     assert market["inventory"]["warehouse_warrant"] == rows[-1]["warehouse_warrant"]
     assert market["inventory"]["inventory"] == rows[-1]["inventory"]
     assert market["indicators"]["status"] == "ready"
     values = market["indicators"]["values"]
-    for key in ("sma_5", "sma_20", "rsi_14", "macd", "macd_signal", "volatility_20"):
+    for key in (
+        "sma_5",
+        "sma_20",
+        "ema_12",
+        "ema_26",
+        "rsi_14",
+        "macd",
+        "macd_signal",
+        "atr_14",
+        "volatility_20",
+        "volume_change_1",
+        "open_interest_change_1",
+    ):
         assert isinstance(values[key], (int, float)), key
+    assert market["indicators"]["inventory_summary"]["warehouse_warrant_latest"] == rows[-1]["warehouse_warrant"]
+    assert market["indicators"]["inventory_summary"]["inventory_latest"] == rows[-1]["inventory"]
+    assert market["indicators"]["inventory_summary"]["warehouse_warrant_change_1"] == 1
+    assert market["indicators"]["inventory_summary"]["inventory_change_1"] == 3
     manifest = market["indicators"]["manifest"]
+    assert manifest["data_kind"] == "technical_indicator"
+    assert "ema_12" in manifest["indicator_names"]
+    assert "atr_14" in manifest["indicator_names"]
     assert manifest["sample_data_used"] is False
     assert manifest["allowed_for_training"] is False
     assert manifest["allowed_for_prediction"] is False
     assert manifest["allowed_for_backtest"] is False
+    stored_manifest = ManifestStore(output_dir=tmp_path / "outputs").load_manifest("public_market_indicators")
+    assert stored_manifest["data_kind"] == "technical_indicator"
+    assert stored_manifest["content_hash"] == manifest["content_hash"]
+    assert stored_manifest["allowed_for_training"] is False
+    assert stored_manifest["allowed_for_prediction"] is False
+    assert stored_manifest["allowed_for_backtest"] is False
     assert payload["prediction_generated"] is False
     json.dumps(payload, ensure_ascii=True, sort_keys=True)
+
+
+def test_intraday_status_uses_real_intraday_bars_not_latest_quote(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("SN_DATA_DIR", str(tmp_path))
+    rows = _daily_rows(40)
+    _persist_daily(tmp_path, rows)
+    store = IntradayStore(output_dir=tmp_path / "outputs")
+    store.persist_latest_quote(
+        provider_id="local_api_provider",
+        symbol="SN",
+        quote={"latest_price": 252300, "quote_time": "2026-06-11T09:31:00+08:00"},
+        fetched_at="2026-06-11T09:31:05+08:00",
+    )
+    store.persist_intraday_bars(
+        provider_id="local_api_provider",
+        symbol="SN",
+        interval="1m",
+        rows=[
+            {"bar_start": "2026-06-11T09:30:00+08:00", "bar_end": "2026-06-11T09:31:00+08:00", "open": 252000, "high": 252500, "low": 251900, "close": 252300},
+            {"bar_start": "2026-06-11T09:31:00+08:00", "bar_end": "2026-06-11T09:32:00+08:00", "open": 252300, "high": 252700, "low": 252100, "close": 252600},
+        ],
+        fetched_at="2026-06-11T09:32:05+08:00",
+    )
+
+    status, payload = handle_terminal_api("/api/public-terminal/market", "GET", {}, None)
+
+    assert status == 200
+    intraday_status = payload["market"]["intraday_status"]
+    assert intraday_status["status"] == "ready"
+    assert intraday_status["interval"] == "1m"
+    assert intraday_status["row_count"] == 2
+    assert intraday_status["latest_bar_time"] == "2026-06-11T09:32:00+08:00"
+    assert intraday_status["latest_quote_used_as_intraday_bar"] is False
+    assert intraday_status["daily_bar_used_as_intraday"] is False
+    assert payload["market"]["latest_quote"]["latest_price"] == 252300
 
 
 def test_stale_daily_bars_are_displayable_but_prediction_denied(tmp_path: Path, monkeypatch) -> None:

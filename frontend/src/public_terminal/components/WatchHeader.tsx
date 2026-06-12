@@ -10,6 +10,7 @@ function formatNumber(value: unknown) {
 
 export function WatchHeader({ market }: { market: Market }) {
   const header = market.watch_header || {};
+  const intraday = market.intraday_status || {};
   return (
     <section className="section-card market-watch-header" data-testid="watch-header">
       <div className="section-card__header">
@@ -33,6 +34,11 @@ export function WatchHeader({ market }: { market: Market }) {
           <span className="metric-label">Volume</span>
           <strong>{formatNumber(header.volume)}</strong>
           <small>open interest {formatNumber(header.open_interest)}</small>
+        </div>
+        <div>
+          <span className="metric-label">Minute line</span>
+          <strong>{String(intraday.status || "blocked")}</strong>
+          <small>{String(intraday.latest_bar_time || intraday.reason || "missing_intraday_bars")}</small>
         </div>
       </div>
     </section>

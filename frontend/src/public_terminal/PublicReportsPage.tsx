@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { getPublicReport } from "./api";
+import { EventSummary } from "./components/EventSummary";
 import type { PublicReportPayload } from "./types";
 import { friendlyReason, friendlyStatus, technicalSummary } from "./userCopy";
 
@@ -15,6 +16,7 @@ export function PublicReportsPage() {
   const report = payload?.report;
   const exportAllowed = Boolean(report?.export_allowed);
   const eventSummary = report?.event_summary;
+  const eventSection = report?.event_section || eventSummary;
 
   function handleExport() {
     if (!exportAllowed) return;
@@ -56,6 +58,17 @@ export function PublicReportsPage() {
           </div>
         </div>
         {message ? <p role="status" className="inline-warning">{message}</p> : null}
+      </section>
+
+      <section className="section-card">
+        <div className="section-card__header">
+          <div>
+            <h2>Event Summary</h2>
+            <p>News, policy, exchange notices, and supply-chain events are counted by provenance and SHFE SN relevance.</p>
+          </div>
+          <span className="status-pill">{friendlyStatus(report?.event_coverage === "ready" ? "ready" : "blocked")}</span>
+        </div>
+        <EventSummary dataTestId="report-event-summary-section" summary={eventSection} />
       </section>
 
       <section className="guided-empty-state">

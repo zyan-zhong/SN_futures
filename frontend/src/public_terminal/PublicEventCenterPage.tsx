@@ -1,11 +1,8 @@
 import { useEffect, useState } from "react";
 import { getPublicEvents } from "./api";
+import { EventSummary } from "./components/EventSummary";
 import type { PublicEventItem, PublicEventsPayload } from "./types";
 import { friendlyReason, friendlyStatus, technicalSummary } from "./userCopy";
-
-function countLabel(value: number | undefined, label: string) {
-  return `${Number(value || 0)} ${label}`;
-}
 
 function relevanceLabel(value: number | undefined) {
   if (typeof value !== "number" || !Number.isFinite(value)) return "relevance n/a";
@@ -72,27 +69,15 @@ export function PublicEventCenterPage() {
           <span className="status-pill">{friendlyStatus(center?.status)}</span>
         </div>
 
-        <div className="metric-grid compact" data-testid="event-summary">
-          <div className="metric-card">
-            <span className="metric-label">Total events</span>
-            <strong>{Number(summary?.total_count || 0)}</strong>
-            <small>{error || friendlyReason(center?.reason, "event rows loaded")}</small>
-          </div>
-          <div className="metric-card">
-            <span className="metric-label">Eligible</span>
-            <strong>{countLabel(summary?.eligible_count, "eligible")}</strong>
-            <small>Requires source_published_at and SHFE SN relevance.</small>
-          </div>
-          <div className="metric-card">
-            <span className="metric-label">Rejected</span>
-            <strong>{Number(summary?.rejected_count || 0)}</strong>
-            <small>Visible for diagnosis, not used in model input.</small>
-          </div>
-          <div className="metric-card">
-            <span className="metric-label">Latest source time</span>
-            <strong>{summary?.latest_source_published_at || "missing"}</strong>
-            <small>Fetched {summary?.latest_fetched_at || "missing"}</small>
-          </div>
+        <div data-testid="event-summary">
+          <EventSummary
+            dataTestId="event-summary-section"
+            summary={{
+              ...summary,
+              reason: error || friendlyReason(center?.reason, "event rows loaded"),
+              status: center?.status
+            }}
+          />
         </div>
       </section>
 
@@ -103,10 +88,11 @@ export function PublicEventCenterPage() {
           ))}
         </section>
       ) : (
-        <section className="guided-empty-state">
+        <section className="guided-empty-state" data-testid="event-empty-state">
           <header>
             <strong>{friendlyStatus("blocked")}</strong>
             <span>{error || friendlyReason(center?.reason, "No event rows in the local data layer.")}</span>
+            {center?.reason ? <small>{center.reason}</small> : null}
           </header>
         </section>
       )}

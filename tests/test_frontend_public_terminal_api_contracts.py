@@ -1,90 +1,27 @@
 from __future__ import annotations
 
 import re
+import sys
 from pathlib import Path
+
+
+sys.path.insert(0, "src")
+
+from sn_futures.public_terminal.schema import build_public_terminal_openapi
 
 
 PUBLIC_TERMINAL_DIR = Path("frontend/src/public_terminal")
 FRONTEND_SRC_DIR = Path("frontend/src")
 
-EXPECTED_PUBLIC_ENDPOINTS = [
-    {
-        "method": "GET",
-        "path": "/api/public-terminal/readiness",
-        "client": "getPublicReadiness",
-        "response_type": "PublicReadinessPayload",
-    },
-    {
-        "method": "GET",
-        "path": "/api/public-terminal/settings/status",
-        "client": "getPublicSettingsStatus",
-        "response_type": "PublicSettingsStatus",
-    },
-    {
-        "method": "POST",
-        "path": "/api/public-terminal/settings/save",
-        "client": "savePublicSettings",
-        "response_type": "PublicSettingsSavePayload",
-    },
-    {
-        "method": "POST",
-        "path": "/api/public-terminal/settings/reset",
-        "client": "resetPublicSettings",
-        "response_type": "PublicSettingsSavePayload",
-    },
-    {
-        "method": "POST",
-        "path": "/api/public-terminal/provider-smoke",
-        "client": "runPublicProviderSmoke",
-        "response_type": "PublicSmokePayload",
-    },
-    {
-        "method": "POST",
-        "path": "/api/public-terminal/provider-smoke-real",
-        "client": "runPublicProviderSmokeReal",
-        "response_type": "PublicSmokePayload",
-    },
-    {
-        "method": "POST",
-        "path": "/api/public-terminal/refresh-data-status",
-        "client": "startPublicDataRefresh",
-        "response_type": "PublicTaskPayload",
-    },
-    {
-        "method": "GET",
-        "path": "/api/public-terminal/tasks/{task_id}",
-        "client": "getPublicTask",
-        "response_type": "PublicTaskPayload",
-    },
-    {
-        "method": "POST",
-        "path": "/api/public-terminal/tasks/{task_id}/cancel",
-        "client": "cancelPublicTask",
-        "response_type": "PublicTaskCancelPayload",
-    },
-    {
-        "method": "GET",
-        "path": "/api/public-terminal/market",
-        "client": "getPublicMarket",
-        "response_type": "PublicMarketPayload",
-    },
-    {
-        "method": "GET",
-        "path": "/api/public-terminal/events",
-        "client": "getPublicEvents",
-        "response_type": "PublicEventsPayload",
-    },
-    {
-        "method": "GET",
-        "path": "/api/public-terminal/report",
-        "client": "getPublicReport",
-        "response_type": "PublicReportPayload",
-    },
-]
-
 
 def _read(path: Path) -> str:
     return path.read_text(encoding="utf-8")
+
+
+def _backend_endpoints() -> list[dict[str, object]]:
+    endpoints = build_public_terminal_openapi().get("endpoints")
+    assert isinstance(endpoints, list)
+    return [endpoint for endpoint in endpoints if isinstance(endpoint, dict)]
 
 
 def _manifest_entry_body(source: str, path: str) -> str:
@@ -99,13 +36,14 @@ def test_public_terminal_endpoint_manifest_maps_clients_types_and_pages() -> Non
     source = _read(manifest_path)
 
     assert "publicTerminalEndpointManifest" in source
-    for endpoint in EXPECTED_PUBLIC_ENDPOINTS:
-        body = _manifest_entry_body(source, endpoint["path"])
+    for endpoint in _backend_endpoints():
+        path = str(endpoint["path"])
+        body = _manifest_entry_body(source, path)
         assert f'method: "{endpoint["method"]}"' in body
-        assert f'clientFunction: "{endpoint["client"]}"' in body
-        assert f'responseSchemaName: "{endpoint["response_type"]}"' in body
+        assert f'clientFunction: "{endpoint["client_function"]}"' in body
+        assert f'responseSchemaName: "{endpoint["response_schema_name"]}"' in body
         assert 'classification: "public"' in body
-        assert "sideEffectClassification:" in body
+        assert f'sideEffectClassification: "{endpoint["side_effect_classification"]}"' in body
         assert "forbiddenSideEffects:" in body
         assert "usedBy:" in body
 
@@ -113,15 +51,16 @@ def test_public_terminal_endpoint_manifest_maps_clients_types_and_pages() -> Non
 def test_public_terminal_api_client_has_all_manifested_functions_and_paths() -> None:
     source = _read(PUBLIC_TERMINAL_DIR / "api.ts")
 
-    for endpoint in EXPECTED_PUBLIC_ENDPOINTS:
-        assert f"export function {endpoint['client']}" in source
-        if "{task_id}" in endpoint["path"]:
-            prefix, suffix = endpoint["path"].split("{task_id}")
+    for endpoint in _backend_endpoints():
+        path = str(endpoint["path"])
+        assert f"export function {endpoint['client_function']}" in source
+        if "{task_id}" in path:
+            prefix, suffix = path.split("{task_id}")
             assert prefix in source
             assert suffix in source
         else:
-            assert endpoint["path"] in source
-        assert endpoint["response_type"] in source
+            assert path in source
+        assert str(endpoint["response_schema_name"]) in source
 
     assert "allow_remote: false" in source
 
@@ -129,8 +68,9 @@ def test_public_terminal_api_client_has_all_manifested_functions_and_paths() -> 
 def test_public_terminal_response_types_exist_and_do_not_allow_raw_secrets() -> None:
     source = _read(PUBLIC_TERMINAL_DIR / "types.ts")
 
-    for endpoint in EXPECTED_PUBLIC_ENDPOINTS:
-        assert f"export interface {endpoint['response_type']}" in source or f"export type {endpoint['response_type']}" in source
+    for endpoint in _backend_endpoints():
+        response_type = str(endpoint["response_schema_name"])
+        assert f"export interface {response_type}" in source or f"export type {response_type}" in source
 
     forbidden_response_fields = [
         "raw_secret",
@@ -165,3 +105,35 @@ def test_api_error_handling_preserves_error_code_and_blocking_reason() -> None:
     assert "payload" in source
     assert "status" in source
     assert re.search(r"throw new ApiError\(", source)
+
+
+def test_public_terminal_e2e_mocks_only_manifested_public_endpoints() -> None:
+    known = {str(endpoint["path"]) for endpoint in _backend_endpoints()}
+    dynamic_task = "/api/public-terminal/tasks/{task_id}"
+    dynamic_task_cancel = "/api/public-terminal/tasks/{task_id}/cancel"
+    violations: list[str] = []
+    for path in Path("frontend/e2e").glob("*.spec.ts"):
+        source = _read(path)
+        for mocked_path in re.findall(r'path\s*={2,3}\s*"(/api/public-terminal/[^"]+)"', source):
+            normalized = mocked_path
+            if re.fullmatch(r"/api/public-terminal/tasks/[^/]+", mocked_path):
+                normalized = dynamic_task
+            elif re.fullmatch(r"/api/public-terminal/tasks/[^/]+/cancel", mocked_path):
+                normalized = dynamic_task_cancel
+            if normalized not in known:
+                violations.append(f"{path}:{mocked_path}")
+
+    assert violations == []
+
+
+def test_public_terminal_e2e_mocks_preserve_error_and_blocking_shape_terms() -> None:
+    public_e2e_sources = "\n".join(
+        _read(path)
+        for path in Path("frontend/e2e").glob("*.spec.ts")
+        if "/api/public-terminal/" in _read(path)
+    )
+
+    assert "blocking_reasons" in public_e2e_sources
+    assert "error_code" in public_e2e_sources or "reason" in public_e2e_sources
+    for flag in ("training_invoked", "prediction_generated", "backtest_invoked"):
+        assert flag in public_e2e_sources

@@ -1451,6 +1451,114 @@ def _public_ok(payload: Any) -> tuple[int, dict[str, Any]]:
     return _ok(assert_public_payload_real_or_blocked(payload if isinstance(payload, Mapping) else {}))
 
 
+def _public_error(
+    error_code: str,
+    message: str,
+    *,
+    status: int = 400,
+    blocking_reasons: list[str] | None = None,
+    details_sanitized: Mapping[str, Any] | None = None,
+) -> tuple[int, dict[str, Any]]:
+    return status, sanitize_for_json(
+        {
+            "status": "blocked",
+            "error_code": error_code,
+            "message": message,
+            "blocking_reasons": list(blocking_reasons or [error_code]),
+            "details_sanitized": dict(details_sanitized or {}),
+            "training_invoked": False,
+            "prediction_generated": False,
+            "backtest_invoked": False,
+            "feature_store_written": False,
+            "customer_prediction_generated": False,
+        }
+    )
+
+
+def _public_parse_body(body: Any) -> tuple[dict[str, Any] | None, tuple[int, dict[str, Any]] | None]:
+    payload, error = _parse_body(body)
+    if error is None:
+        return payload or {}, None
+    code = str(error.get("error") or "invalid_json")
+    return None, _public_error(
+        code,
+        str(error.get("message") or "Invalid Public Terminal request body."),
+        blocking_reasons=[code],
+        details_sanitized={"source": "public_terminal", "legacy_error": code},
+    )
+
+
+def _public_settings_status(payload: Mapping[str, Any]) -> dict[str, Any]:
+    local_configured = bool(payload.get("local_api_provider_configured"))
+    alpha_configured = bool(payload.get("alpha_vantage_configured"))
+    news_configured = bool(payload.get("newsapi_configured"))
+    tushare_configured = bool(payload.get("tushare_configured"))
+    masked = (
+        str(payload.get("local_api_provider_token_masked") or "")
+        or str(payload.get("alpha_vantage_masked") or "")
+        or str(payload.get("newsapi_masked") or "")
+        or str(payload.get("tushare_masked") or "")
+    )
+    configured = bool(local_configured or alpha_configured or news_configured or tushare_configured)
+    sources = [
+        {
+            "id": "local_api_provider",
+            "label": "Local API Provider",
+            "configured": local_configured,
+            "masked": str(payload.get("local_api_provider_token_masked") or ""),
+        },
+        {
+            "id": "alpha_vantage",
+            "label": "Alpha Vantage",
+            "configured": alpha_configured,
+            "masked": str(payload.get("alpha_vantage_masked") or ""),
+        },
+        {
+            "id": "newsapi",
+            "label": "NewsAPI",
+            "configured": news_configured,
+            "masked": str(payload.get("newsapi_masked") or ""),
+        },
+        {
+            "id": "tushare",
+            "label": "Tushare",
+            "configured": tushare_configured,
+            "masked": str(payload.get("tushare_masked") or ""),
+        },
+    ]
+    return {
+        **dict(payload),
+        "configured": configured,
+        "masked": masked,
+        "sources": sources,
+        "blocking_reasons": [] if configured else ["provider_keys_missing"],
+        "training_invoked": False,
+        "prediction_generated": False,
+        "backtest_invoked": False,
+        "feature_store_written": False,
+        "customer_prediction_generated": False,
+    }
+
+
+def _public_settings_save_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
+    provider = str(payload.get("provider") or "local_api_provider").strip().lower()
+    token = str(payload.get("token") or "").strip()
+    base_url = str(payload.get("base_url") or "").strip()
+    legacy_payload: dict[str, Any] = {}
+    if provider in {"alpha_vantage", "alpha-vantage", "alphavantage"}:
+        legacy_payload["SN_ALPHA_VANTAGE_KEY"] = token
+    elif provider in {"newsapi", "news_api"}:
+        legacy_payload["SN_NEWSAPI_KEY"] = token
+    elif provider == "tushare":
+        legacy_payload["SN_TUSHARE_TOKEN"] = token
+    else:
+        legacy_payload["SN_LOCAL_API_PROVIDER_TOKEN"] = token
+        if base_url:
+            legacy_payload["SN_LOCAL_API_PROVIDER_BASE_URL"] = base_url
+            legacy_payload["SN_LOCAL_API_PROVIDER_ENABLED"] = "1"
+    return legacy_payload
+
+
 def _task_response(kind: str, fn: Any, payload: dict[str, Any] | None = None) -> tuple[int, dict[str, Any]]:
     return _ok(start_task(kind, fn, payload=payload or {}))
 
@@ -1490,6 +1598,27 @@ def _handle_public_terminal_api(
     if method == "GET" and path == "/api/public-terminal/prediction-status":
         return _public_ok(build_public_prediction_status_payload())
 
+    if method == "GET" and path == "/api/public-terminal/settings/status":
+        return _public_ok(_public_settings_status(get_terminal_settings_status()))
+
+    if method == "POST" and path == "/api/public-terminal/settings/save":
+        payload, error = _public_parse_body(body)
+        if error is not None:
+            return error
+        try:
+            saved = save_terminal_secrets(_public_settings_save_payload(payload or {}))
+        except ValueError as exc:
+            return _public_error(
+                "invalid_public_settings",
+                str(exc),
+                blocking_reasons=["invalid_public_settings"],
+                details_sanitized={"provider": str((payload or {}).get("provider") or "")},
+            )
+        return _public_ok(_public_settings_status(saved))
+
+    if method == "POST" and path == "/api/public-terminal/settings/reset":
+        return _public_ok(_public_settings_status(reset_terminal_secrets()))
+
     if method == "GET" and path == "/api/public-terminal/market":
         return _public_ok(build_public_market())
 
@@ -1500,9 +1629,9 @@ def _handle_public_terminal_api(
         return _public_ok(build_public_report())
 
     if method == "POST" and path in {"/api/public-terminal/provider-smoke", "/api/public-terminal/provider-smoke-real"}:
-        payload, error = _parse_body(body)
+        payload, error = _public_parse_body(body)
         if error is not None:
-            return 400, error
+            return error
         provider = str((payload or {}).get("provider") or "").strip().lower()
         allow_remote = bool((payload or {}).get("allow_remote")) if path.endswith("provider-smoke-real") else False
         smoke = run_provider_only_smoke(

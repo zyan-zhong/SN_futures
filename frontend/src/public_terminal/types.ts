@@ -1,4 +1,15 @@
-export type PublicStatus = "success" | "ready" | "blocked" | "stale" | "skipped" | "running" | "queued" | "failed" | "not_run" | string;
+export type PublicStatus =
+  | "success"
+  | "ready"
+  | "ready_no_prediction_output"
+  | "blocked"
+  | "stale"
+  | "skipped"
+  | "running"
+  | "queued"
+  | "failed"
+  | "not_run"
+  | string;
 
 export type PublicTerminalRequestSchemaName =
   | "PublicEmptyRequest"
@@ -64,6 +75,27 @@ export interface PublicTerminalOpenApiPayload {
   side_effects: PublicTerminalSideEffects;
 }
 
+export interface PublicPredictionReadiness {
+  status?: PublicStatus;
+  can_predict?: boolean;
+  ready_for_prediction?: boolean;
+  reason?: string;
+  active_release_safe?: boolean;
+  missing_data?: string[];
+  missing_model_evidence?: string[];
+  missing_evidence?: string[];
+  blocking_reasons?: string[];
+  prediction_output_available?: boolean;
+  prediction_output_suppressed?: boolean;
+  prediction_output_reason?: string;
+  training_invoked?: false;
+  prediction_generated?: false;
+  backtest_invoked?: false;
+  feature_store_written?: false;
+  production_cache_written?: false;
+  customer_prediction_generated?: false;
+}
+
 export interface PublicReadinessPayload {
   status?: PublicStatus;
   summary?: string;
@@ -73,15 +105,8 @@ export interface PublicReadinessPayload {
   blocking_reasons?: string[];
   data_watermark?: Record<string, unknown>;
   provider_status?: Record<string, unknown>;
-  prediction_readiness?: Record<string, unknown>;
-  prediction_core_readiness?: {
-    status?: PublicStatus;
-    can_predict?: boolean;
-    reason?: string;
-    active_release_safe?: boolean;
-    missing_evidence?: string[];
-    blocking_reasons?: string[];
-  };
+  prediction_readiness?: PublicPredictionReadiness;
+  prediction_core_readiness?: PublicPredictionReadiness;
 }
 
 export interface PublicPredictionStatusPayload {
@@ -89,6 +114,7 @@ export interface PublicPredictionStatusPayload {
   prediction_status?: {
     schema_version?: string;
     status?: PublicStatus;
+    dry_run_status?: PublicStatus;
     dry_run?: boolean;
     can_predict?: boolean;
     ready_to_generate_prediction?: boolean;
@@ -205,9 +231,20 @@ export interface PublicMarketPayload {
       open_interest?: number | string | null;
     };
     latest_quote?: Record<string, unknown> | null;
+    intraday_status?: {
+      status?: PublicStatus;
+      reason?: string;
+      interval?: string;
+      row_count?: number;
+      latest_bar_time?: string;
+      latest_quote_used_as_intraday_bar?: boolean;
+      daily_bar_used_as_intraday?: boolean;
+      blocking_reasons?: string[];
+    };
     indicators?: {
       status?: PublicStatus;
       values?: Record<string, number>;
+      inventory_summary?: Record<string, number | null>;
       blocking_reasons?: string[];
       manifest?: Record<string, unknown>;
     };
@@ -302,6 +339,12 @@ export interface PublicReportPayload {
     event_count?: number;
     timed_event_count?: number;
     event_summary?: PublicEventCenterSummary;
+    event_section?: PublicEventCenterSummary & {
+      status?: PublicStatus;
+      reason?: string;
+      investment_advice?: boolean;
+      used_for_customer_prediction?: boolean;
+    };
     research_only?: boolean;
     investment_advice?: boolean;
     export_allowed?: boolean;

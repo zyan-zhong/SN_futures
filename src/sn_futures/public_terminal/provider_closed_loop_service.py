@@ -83,7 +83,7 @@ def _provider_id(payload: Mapping[str, Any], manifest: Mapping[str, Any], source
 def _normalize_error_code(value: Any) -> str:
     text = str(value or "").strip().lower()
     if text in SKIPPED_NO_REMOTE_CODES:
-        return "skipped_no_remote"
+        return "remote_http_disabled"
     if text in {"timeout", "timed_out"}:
         return "request_timeout"
     if text in {"malformed", "schema_mismatch"}:

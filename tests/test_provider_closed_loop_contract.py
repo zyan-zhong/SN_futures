@@ -11,8 +11,10 @@ import pytest
 sys.path.insert(0, "src")
 
 from sn_futures.api.terminal_api import handle_terminal_api
+from sn_futures.data_layer.event_store import EventStore
 from sn_futures.data_layer.provider_result_store import load_provider_result
 from sn_futures.data_layer.watermark import WatermarkStore
+from sn_futures.public_terminal.event_service import build_public_event_center
 from sn_futures.public_terminal.market_service import build_public_market
 from sn_futures.public_terminal.provider_closed_loop_service import record_provider_closed_loop_result
 from sn_futures.public_terminal.provider_smoke_result_bridge_service import bridge_provider_smoke_result
@@ -33,7 +35,7 @@ PROVIDERS = (
 
 SCENARIOS = (
     "not_configured",
-    "skipped_no_remote",
+    "remote_http_disabled",
     "timeout",
     "rate_limited",
     "no_rows",
@@ -123,7 +125,7 @@ def _smoke_payload(provider_id: str, scenario: str) -> dict[str, Any]:
         }
     error_code = {
         "not_configured": "not_configured",
-        "skipped_no_remote": "skipped_no_remote",
+        "remote_http_disabled": "remote_http_disabled",
         "timeout": "request_timeout",
         "rate_limited": "rate_limited",
         "no_rows": "no_rows",
@@ -240,6 +242,105 @@ def test_valid_provider_closed_loop_feeds_public_readiness_refresh_market_or_rep
         assert report["report"]["provider_status"] in {"ready", "degraded"}
 
 
+def test_allow_remote_false_is_preserved_as_remote_http_disabled(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("SN_DATA_DIR", str(tmp_path))
+
+    status, payload = handle_terminal_api(
+        "/api/public-terminal/provider-smoke",
+        "POST",
+        {},
+        {"provider": "alpha_vantage"},
+    )
+
+    assert status == 200
+    assert payload["providers"][0]["provider_id"] == "alpha_vantage"
+    assert payload["providers"][0]["error_code"] == "remote_http_disabled"
+
+    result = load_provider_result("alpha_vantage")
+    assert result["error_code"] == "remote_http_disabled"
+    assert result["manifest"]["allow_remote"] is False
+    assert result["manifest"]["blocking_reasons"] == ["remote_http_disabled"]
+
+    watermark_record = _provider_record(WatermarkStore().load(), "alpha_vantage")
+    assert "remote_http_disabled" in watermark_record["blocking_reasons"]
+
+
+def test_event_without_source_published_at_is_visible_but_not_used_in_model(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("SN_DATA_DIR", str(tmp_path))
+    payload = _smoke_payload("newsapi", "valid_fake_rows")
+    payload["rows"] = [
+        {
+            "title": "SHFE tin supply chain update",
+            "summary": "Tin inventory and SHFE warehouse warrant context.",
+            "url": "https://example.invalid/newsapi/undated-tin",
+        }
+    ]
+    payload["normalized_rows"] = payload["rows"]
+    payload["row_count"] = 1
+    payload["manifest"]["row_count"] = 1
+    payload["manifest"]["normalized_row_count"] = 1
+    payload["manifest"].pop("source_published_at", None)
+    payload.pop("source_timestamp", None)
+
+    record_provider_closed_loop_result(payload, source="contract_test")
+
+    stored_events = EventStore().load_events("news_event")
+    assert stored_events[0]["source_published_at"] == ""
+    assert stored_events[0]["used_in_model"] is False
+    assert stored_events[0]["allowed_for_event_factor"] is False
+    assert stored_events[0]["rejection_reason"] == "missing_source_published_at"
+
+    event_center = build_public_event_center()["event_center"]
+    assert event_center["status"] == "ready"
+    assert event_center["events"][0]["used_in_model"] is False
+    assert "missing_source_published_at" in event_center["events"][0]["blocking_reasons"]
+    assert event_center["summary"]["eligible_count"] == 0
+
+
+def test_stale_daily_cache_is_display_allowed_but_prediction_blocked(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("SN_DATA_DIR", str(tmp_path))
+    payload = _smoke_payload("local_api_provider", "valid_fake_rows")
+    payload["manifest"]["cache_status"] = "cache"
+    payload["manifest"]["stale_status"] = "stale"
+
+    record_provider_closed_loop_result(payload, source="contract_test")
+
+    watermark = WatermarkStore().load()
+    record = _provider_record(watermark, "local_api_provider")
+    assert record["status"] == "stale"
+    assert record["allowed_for_display"] is True
+    assert record["allowed_for_feature_store"] is False
+    assert record["allowed_for_training"] is False
+    assert record["allowed_for_prediction"] is False
+    assert record["allowed_for_backtest"] is False
+    assert "daily_bar:stale" in record["blocking_reasons"]
+
+    readiness = build_public_terminal_readiness()
+    assert readiness["data_watermark"]["allowed_for_display"] is True
+    assert readiness["data_watermark"]["allowed_for_prediction"] is False
+
+    market = build_public_market()
+    assert market["market"]["status"] == "stale"
+    assert market["market"]["chart"][-1]["close"] == 260000
+    assert market["market"]["data_watermark_panel"]["display_allowed"] is True
+    assert market["market"]["data_watermark_panel"]["prediction_allowed"] is False
+
+    report = build_public_report()
+    assert report["report"]["status"] == "stale"
+    assert report["report"]["reason"] == "stale_daily_bars"
+    assert report["report"]["market_data_coverage"] == "stale"
+    assert report["report"]["data_watermark"]["allowed_for_prediction"] is False
+
+
 def test_legacy_provider_bridge_writes_data_layer_provider_result_and_watermark(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -271,8 +372,8 @@ def test_public_provider_smoke_defaults_to_no_remote_and_still_writes_closed_loo
 
     assert status == 200
     assert payload["providers"][0]["provider_id"] == "alpha_vantage"
-    assert payload["providers"][0]["error_code"] == "skipped_no_remote"
+    assert payload["providers"][0]["error_code"] == "remote_http_disabled"
     result = load_provider_result("alpha_vantage")
-    assert result["error_code"] == "skipped_no_remote"
+    assert result["error_code"] == "remote_http_disabled"
     assert result["manifest"]["allow_remote"] is False
     assert WatermarkStore().load()["schema_version"] == "data-layer-watermark-v1"

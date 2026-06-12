@@ -20,6 +20,7 @@ DOWNSTREAM_FLAGS = (
     "customer_prediction_generated",
 )
 SUCCESS_STATUSES = {"success", "pass", "passed", "ready"}
+REMOTE_DISABLED_CODES = {"remote_http_disabled", "remote_disabled", "skipped_no_remote"}
 
 
 def _now() -> str:
@@ -50,6 +51,11 @@ def _nested_status(payload: Mapping[str, Any]) -> Mapping[str, Any]:
     return status if isinstance(status, Mapping) else {}
 
 
+def _normalize_error_code(value: Any) -> str:
+    text = str(value or "").strip()
+    return "remote_http_disabled" if text.lower() in REMOTE_DISABLED_CODES else text
+
+
 def _provider_id(payload: Mapping[str, Any], source_statuses: list[Mapping[str, Any]]) -> str:
     for key in ("provider_id", "provider", "source_id", "id"):
         value = str(payload.get(key) or "").strip().lower()
@@ -78,26 +84,24 @@ def _row_count(payload: Mapping[str, Any], manifest: Mapping[str, Any], source_s
 
 def _error_code(payload: Mapping[str, Any], manifest: Mapping[str, Any], source_statuses: list[Mapping[str, Any]]) -> str:
     for value in (payload.get("error_code"), payload.get("error"), payload.get("reason")):
-        text = str(value or "").strip()
+        text = _normalize_error_code(value)
         if text:
-            return "skipped_no_remote" if text == "remote_http_disabled" else text
+            return text
     nested = _nested_status(payload)
     for value in (nested.get("error_code"), nested.get("error"), nested.get("reason")):
-        text = str(value or "").strip()
+        text = _normalize_error_code(value)
         if text:
-            return "skipped_no_remote" if text == "remote_http_disabled" else text
+            return text
     reasons = _as_list(manifest.get("blocking_reasons") or payload.get("blocking_reasons"))
     if reasons:
-        text = str(reasons[0])
-        return "skipped_no_remote" if text == "remote_http_disabled" else text
+        return _normalize_error_code(reasons[0])
     nested_reasons = _as_list(nested.get("blocking_reasons"))
     if nested_reasons:
-        text = str(nested_reasons[0])
-        return "skipped_no_remote" if text == "remote_http_disabled" else text
+        return _normalize_error_code(nested_reasons[0])
     for status in source_statuses:
-        text = str(status.get("error_code") or status.get("error") or "").strip()
+        text = _normalize_error_code(status.get("error_code") or status.get("error"))
         if text:
-            return "skipped_no_remote" if text == "remote_http_disabled" else text
+            return text
     return ""
 
 
